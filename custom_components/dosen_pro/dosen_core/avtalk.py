@@ -239,15 +239,31 @@ class AVTalkSender:
                                         name="avtalk-sender")
         self._thread.start()
 
-    LIVE_MAX_QUEUE = 3                       # ≈ 0,3 s ở 10 fps: dồn quá mức này là đang tụt lại sau thời gian thật
+    LIVE_MAX_QUEUE = 20                      # ≈ 2 s ở 10 fps: dồn quá mức này mới phải bỏ khung (xem push)
+    LIVE_CATCHUP_MAX = 3.0                   # dồn thì gửi nhanh hơn nhịp tới 3 lần để bắt kịp (không bỏ khung)
 
     def set_live(self, live: bool) -> None:
         self.live = bool(live)
 
+    def _trim_to_latest_key(self) -> None:
+        """Hàng đợi quá dài: bỏ mọi khung TRƯỚC khung khoá mới nhất (các khung sau nó vẫn giải mã được); không có khung khoá thì bỏ hết, đợi khung khoá kế."""
+        items = []
+        while True:
+            try:
+                items.append(self._q.get_nowait())
+            except queue.Empty:
+                break
+        keys = [i for i, (k, _au) in enumerate(items) if k]
+        keep = items[keys[-1]:] if keys else []
+        self.live_dropped += len(items) - len(keep)
+        if not keys:
+            self._need_key = True
+        for it in keep:
+            self._q.put_nowait(it)
+
     def push(self, is_key: bool, au: bytes) -> None:
         if self.live and self._q.qsize() >= self.LIVE_MAX_QUEUE:
-            self.live_dropped += 1
-            self.reset()                                # bỏ hết khung cũ, đợi khung khoá kế (≤ 1 s với nguồn trực tiếp)
+            self._trim_to_latest_key()
         try:
             self._q.put_nowait((is_key, au))
         except queue.Full:
@@ -336,7 +352,11 @@ class AVTalkSender:
                             else:
                                 self._send(delta_packet(au))
                             self.video_sent += 1
-                        next_video = max(next_video + period, now - period)
+                        backlog = self._q.qsize()
+                        # Nguồn trực tiếp giật (khung tới theo đợt): KHÔNG bỏ khung rồi đợi khung khoá (đo: đợt 1 s → chỉ 1,9 khung/s, đứng tới 7 s),
+                        # mà gửi nhanh hơn nhịp khi đang dồn để bắt kịp, tối đa LIVE_CATCHUP_MAX lần.
+                        speed = min(self.LIVE_CATCHUP_MAX, 1 + (backlog - 1) / 2.0) if self.live and backlog > 1 else 1.0
+                        next_video = max(next_video + period / speed, now - period)
                 time.sleep(0.004)
         except (OSError, DVRIPError) as exc:
             if not self._stop.is_set():

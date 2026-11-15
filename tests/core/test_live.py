@@ -135,3 +135,31 @@ def test_http_source_that_needs_login_works_with_the_cookie_header_and_is_401_wi
         srv.shutdown()
     assert keys >= 1
     assert "-headers" not in build_hevc_cmd("rtsp://cam/x", 240, 320, 10, headers="Cookie: a=b\r\n")     # chỉ áp cho nguồn HTTP
+
+
+def test_bursty_live_source_is_caught_up_by_sending_faster_not_by_dropping_frames():
+    """Nguồn trực tiếp giật (khung tới theo đợt): trước đây dồn ≥3 khung thì BỎ HẾT rồi đợi khung khoá (đo 15/11: đợt 1 s → 1,9 khung/s, đứng tới 7 s).
+    Nay không bỏ khung: bắt kịp bằng gửi nhanh hơn nhịp (tối đa LIVE_CATCHUP_MAX lần)."""
+    sent = []
+
+    class Sess:
+        client = None
+
+        def send(self, packet):
+            if packet[:4] in (b"\x00\x00\x01\xfc", b"\x00\x00\x01\xfd"):
+                sent.append(time.monotonic())
+    s = avtalk.AVTalkSender(Sess(), 240, 320, 10)
+    s.set_live(True)
+    s.start()
+    try:
+        t0 = time.monotonic()
+        for i in range(12):                                  # một đợt 12 khung (1,2 s ở 10 fps) tới cùng lúc
+            s.push(i == 0, b"\x00\x00\x00\x01" + bytes([i]) * 50)
+        deadline = time.monotonic() + 3
+        while len(sent) < 12 and time.monotonic() < deadline:
+            time.sleep(0.02)
+        elapsed = sent[-1] - t0 if sent else None
+    finally:
+        s._stop.set()
+    assert len(sent) == 12 and s.live_dropped == 0
+    assert elapsed < 1.0, elapsed                           # theo nhịp thường sẽ mất ≥ 1,1 s; bắt kịp thì nhanh hơn
