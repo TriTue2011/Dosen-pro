@@ -27,6 +27,7 @@ _IMAGE_EXT = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
 _DEFAULT_MODES = ("off", "clock", "image", "video", "live")
 
 
+CAROUSEL_OWNER = "carousel"              # lớp của màn luân phiên: luôn nằm dưới các lớp sự kiện khác
 ROTATIONS = (0, 90, 180, 270)            # độ xoay hình theo chiều kim đồng hồ
 FITS = ("contain", "cover")              # contain = vừa khung (có viền đen); cover = lấp đầy màn (cắt rìa)
 _ROTATE_FILTER = {0: "", 90: "transpose=1,", 180: "hflip,vflip,", 270: "transpose=2,"}
@@ -367,7 +368,10 @@ class Screen:
             layer = {"owner": owner, "source": source, "loop": bool(loop), "after": after,
                      "mode": mode or self._kind(source),
                      "deadline": time.monotonic() + ttl if ttl else None}
-            self._layers.append(layer)
+            if owner == CAROUSEL_OWNER:
+                self._layers.insert(0, layer)              # luân phiên nằm DƯỚI mọi sự kiện: cuộc gọi, chuông cửa, Assist vẫn đè lên
+            else:
+                self._layers.append(layer)
             try:
                 self._apply()
             except Exception:
@@ -383,6 +387,22 @@ class Screen:
             f.write(png)
         status = self.show(path, after=after, owner=owner, ttl=ttl, mode="text")
         for old in os.listdir(self._tmpdir):               # keep the newest text image and the clock only
+            if old.startswith("text-") and old != os.path.basename(path) \
+                    and not any(l["source"].endswith(old) for l in self._layers):
+                try:
+                    os.remove(os.path.join(self._tmpdir, old))
+                except OSError:
+                    pass
+        return status
+
+    def show_clock(self, after: str = "hold", owner: str = "api", ttl: float | None = None) -> dict:
+        """Đồng hồ đầy đủ như MỘT LỚP (dùng cho màn luân phiên). Không tự vẽ lại mỗi phút: người gọi đẩy lại khi cần."""
+        png = render.render_clock(self._now(), self.weather)
+        path = os.path.join(self._tmpdir, "text-%s-%d.png" % (re.sub(r"\W", "_", owner), self.switches + 1))
+        with open(path, "wb") as f:
+            f.write(png)
+        status = self.show(path, after=after, owner=owner, ttl=ttl, mode="clock")
+        for old in os.listdir(self._tmpdir):
             if old.startswith("text-") and old != os.path.basename(path) \
                     and not any(l["source"].endswith(old) for l in self._layers):
                 try:

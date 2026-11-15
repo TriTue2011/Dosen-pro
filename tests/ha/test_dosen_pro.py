@@ -39,10 +39,11 @@ def _fake_camera(monkeypatch):
     monkeypatch.setattr(sat_mod.DosenSatellite, "_chay", _no_loop)
 
 
-async def _setup(hass, options=None, data=None):
+async def _setup(hass, options=None, data=None, entry_id=None):
     assert await async_setup_component(hass, "homeassistant", {})       # Assist cần thành phần này
+    kw = {"entry_id": entry_id} if entry_id else {}
     entry = MockConfigEntry(domain=DOMAIN, data=data or DATA, unique_id=DATA[CONF_HOST], title="Dosen Pro",
-                            options={"alarm_events": False, **(options or {})})
+                            options={"alarm_events": False, **(options or {})}, **kw)
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
@@ -639,3 +640,81 @@ async def test_screen_card_builds_rows_from_entities_and_text(hass):
         await hass.services.async_call(DOMAIN, "screen_card", {"color": "tim"}, blocking=True)
     await hass.services.async_call(DOMAIN, "screen_card", {"value": "5", "caption": "tự khai"}, blocking=True)    # không cần thực thể
     assert _calls("card")[-1]["value"] == "5" and _calls("card")[-1]["rows"] == []
+
+
+# -- màn luân phiên ----------------------------------------------------------------------
+
+async def test_carousel_cycles_pages_under_its_own_owner_and_stop_releases_it(hass, monkeypatch):
+    import custom_components.dosen_pro.carousel as car_mod
+
+    async def fake_source(h, **kw):
+        return "rtsp://x/" + (kw.get("camera_entity") or "")
+    monkeypatch.setattr(car_mod, "resolve_source", fake_source)
+    monkeypatch.setattr(car_mod, "_CHECK_EVERY", 0.1)
+    await _setup(hass)
+    cam, c = _cam(), hass.data[DOMAIN][next(iter(hass.data[DOMAIN]))]
+    hass.states.async_set("sensor.cs", "3.4", {"unit_of_measurement": "kW", "friendly_name": "Công suất"})
+    c.carousel.pages = [{"type": "clock", "seconds": 0.3},
+                        {"type": "card", "title": "Điện", "main_entity": "sensor.cs", "seconds": 0.3},
+                        {"type": "camera", "camera_entity": "camera.cua", "seconds": 0.3}]     # bỏ qua schema để thử nhịp ngắn
+    await c.carousel.async_start()
+    for _ in range(80):
+        kinds = [x[0] for x in cam.screen.calls if x[0] in ("clock", "card", "show")]
+        if kinds.count("clock") >= 2:
+            break
+        await asyncio.sleep(0.05)
+    seq = [(x[0], (x[1].get("owner") if x[0] != "show" else x[1]["owner"])) for x in cam.screen.calls if x[0] in ("clock", "card", "show")]
+    assert [k for k, _ in seq][:4] == ["clock", "card", "show", "clock"]                     # lần lượt rồi quay vòng
+    assert {o for _, o in seq} == {"carousel"}                                               # luôn dưới tên «carousel»
+    card = _calls("card")[0]
+    assert card["value"] == "3,4 kW" and card["ttl"] == pytest.approx(0.9)                  # lớp có hạn dài gấp 3 thời lượng trang
+    assert hass.states.get("switch.dosen_pro_luan_phien_man_hinh").state == "on"
+    await hass.services.async_call(DOMAIN, "screen_carousel", {"enabled": False}, blocking=True)
+    assert ("release", "carousel") in cam.screen.calls and not c.carousel.running
+    n = len(cam.screen.calls)
+    await asyncio.sleep(0.5)
+    assert len(cam.screen.calls) == n                                                          # tắt rồi thì không đẩy gì nữa
+    assert hass.states.get("switch.dosen_pro_luan_phien_man_hinh").state == "off"
+
+
+async def test_carousel_card_is_redrawn_only_when_its_data_changes(hass, monkeypatch):
+    import custom_components.dosen_pro.carousel as car_mod
+    monkeypatch.setattr(car_mod, "_CHECK_EVERY", 0.1)
+    await _setup(hass)
+    cam, c = _cam(), hass.data[DOMAIN][next(iter(hass.data[DOMAIN]))]
+    hass.states.async_set("sensor.nd", "25", {"unit_of_measurement": "°C", "friendly_name": "Nhiệt độ"})
+    c.carousel.pages = [{"type": "card", "main_entity": "sensor.nd", "seconds": 1.2}]
+    await c.carousel.async_start()
+    await asyncio.sleep(0.6)
+    assert len(_calls("card")) == 1                                                            # số liệu không đổi → không vẽ lại
+    hass.states.async_set("sensor.nd", "26", {"unit_of_measurement": "°C", "friendly_name": "Nhiệt độ"})
+    await asyncio.sleep(0.4)
+    assert [x["value"] for x in _calls("card")] == ["25 °C", "26 °C"]                          # đổi thì vẽ lại ngay trong trang
+    await c.carousel.async_stop()
+
+
+async def test_carousel_service_validates_pages_and_needs_pages_to_start(hass):
+    await _setup(hass)
+    with pytest.raises(HomeAssistantError):                                                    # chưa có trang nào
+        await hass.services.async_call(DOMAIN, "screen_carousel", {}, blocking=True)
+    for bad in ([{"type": "bay"}], [{"type": "image"}], [{"type": "camera"}], [{"type": "card"}], [{"type": "clock", "seconds": 1}],
+                [{"type": "clock"}] * 13, [{"type": "clock", "khong_co": 1}]):
+        with pytest.raises(HomeAssistantError):
+            await hass.services.async_call(DOMAIN, "screen_carousel", {"pages": bad}, blocking=True)
+    await hass.services.async_call(DOMAIN, "screen_carousel", {"pages": [{"type": "clock"}, {"type": "text", "title": "Xin chào"}],
+                                                              "seconds": 20}, blocking=True)
+    st = hass.states.get("switch.dosen_pro_luan_phien_man_hinh")
+    assert st.state == "on" and st.attributes["pages"] == ["clock", "text"] and st.attributes["seconds"] == 20.0
+    await hass.services.async_call("switch", "turn_off", {"entity_id": "switch.dosen_pro_luan_phien_man_hinh"}, blocking=True)
+    assert hass.states.get("switch.dosen_pro_luan_phien_man_hinh").state == "off"
+
+
+async def test_carousel_pages_and_switch_survive_a_restart(hass, hass_storage):
+    key = "dosen_pro.eid123.carousel"
+    hass_storage[key] = {"version": 1, "minor_version": 1, "key": key, "data": {
+        "pages": [{"type": "clock", "seconds": 30.0}, {"type": "text", "title": "Nhà"}], "seconds": 12.0, "on": True}}
+    await _setup(hass, entry_id="eid123")
+    c = hass.data[DOMAIN]["eid123"]
+    assert [p["type"] for p in c.carousel.pages] == ["clock", "text"] and c.carousel.seconds == 12.0
+    assert c.carousel.running and hass.states.get("switch.dosen_pro_luan_phien_man_hinh").state == "on"
+    await c.carousel.async_stop()

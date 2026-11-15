@@ -58,6 +58,9 @@ class LocalApi:
                           owner: str = "automation", ttl: float | None = None) -> dict[str, Any]:
         return await self._run(self.camera.screen.show_text, title, messages, font_size, after, owner, ttl)
 
+    async def screen_clock(self, after: str = "hold", owner: str = "automation", ttl: float | None = None) -> dict[str, Any]:
+        return await self._run(self.camera.screen.show_clock, after, owner, ttl)
+
     async def screen_card(self, card: dict, after: str = "hold", owner: str = "automation",
                           ttl: float | None = None) -> dict[str, Any]:
         return await self._run(self.camera.screen.show_card, card["title"], card["value"], card["caption"], card["rows"],

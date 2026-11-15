@@ -18,7 +18,7 @@ from .entity import DosenEntity
 
 async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities) -> None:
     c = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([DosenMuteSwitch(c), DosenShowChat(c), DosenMicAnr(c), DosenKeyTip(c)])
+    async_add_entities([DosenMuteSwitch(c), DosenShowChat(c), DosenMicAnr(c), DosenKeyTip(c), DosenCarousel(c)])
 
 
 class DosenMuteSwitch(DosenEntity, SwitchEntity, RestoreEntity):
@@ -134,3 +134,34 @@ class DosenKeyTip(CoordinatorEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         await self._dat(False)
+
+
+class DosenCarousel(CoordinatorEntity, SwitchEntity):
+    """Màn luân phiên: bật thì các «trang» (đồng hồ, thẻ thông tin, ảnh, camera…) lần lượt hiện lên màn. Trang đặt bằng
+    dịch vụ ``dosen_pro.screen_carousel``; công tắc này chỉ bật/tắt và nhớ trạng thái."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Luân phiên màn hình"
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.entry.entry_id}-carousel"
+        self._attr_device_info = device_info(coordinator.entry.entry_id)
+
+    @property
+    def is_on(self) -> bool:
+        return self.coordinator.carousel.on
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        car = self.coordinator.carousel
+        return {"pages": [p["type"] for p in car.pages], "seconds": car.seconds,
+                "current": car.index if car.running and car.index >= 0 else None}
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.carousel.async_start()          # chưa có trang thì ném lỗi rõ ràng cho người dùng
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.coordinator.carousel.async_stop()
+        self.async_write_ha_state()

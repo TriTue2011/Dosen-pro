@@ -51,6 +51,7 @@ trực tiếp với camera qua giao thức DVRIP (cổng 34567), dùng ffmpeg v�
 | `switch.dosen_pro_tieng_bip_khi_nhan_nut` | Tiếng bíp khi bấm phím trên thân camera (`KeyAudioTip`). |
 | `switch.dosen_pro_tat_mic` | Tắt nghe (loa và màn hình vẫn chạy). |
 | `switch.dosen_pro_hien_hoi_thoai_tren_man_hinh` | Bật/tắt việc hiện hội thoại Assist lên màn. |
+| `switch.dosen_pro_luan_phien_man_hinh` | Bật/tắt màn luân phiên (trang đặt bằng `screen_carousel`). |
 | `select.dosen_pro_man_hinh_mac_dinh` | Loại màn hình mặc định: tắt, đồng hồ, ảnh, video lặp, camera trực tiếp. |
 | `select.dosen_pro_camera_mac_dinh`, `select.dosen_pro_anh_mac_dinh`, `text.dosen_pro_dia_chi_mac_dinh` | Nguồn của màn mặc định: chọn **theo danh sách camera / ảnh của HA**, hoặc gõ địa chỉ. |
 | `select.dosen_pro_thoi_tiet_tren_dong_ho` | Thực thể `weather.*` hiện trên đồng hồ. |
@@ -168,9 +169,48 @@ Không muốn viết automation: dùng blueprint **`man_hinh_the_thong_tin.yaml`
 Người khác muốn đóng góp thẻ mới (giá vàng, thời gian đi làm, lịch trực…) chỉ cần viết một blueprint hoặc automation gọi `screen_card` và gửi vào
 thư mục `blueprints/automation/dosen_pro/`; không phải sửa mã Python. Muốn bố cục hoàn toàn riêng thì tự tạo ảnh 240×320 và dùng `screen_show`.
 
+## Màn luân phiên: tự đổi giữa nhiều màn
+
+Muốn màn camera **tự đổi lần lượt** giữa vài màn (ví dụ đồng hồ → điện mặt trời → camera cửa)? Dùng dịch vụ `dosen_pro.screen_carousel`:
+khai danh sách **trang** và số giây mỗi trang, rồi bật. Công tắc `switch.dosen_pro_luan_phien_man_hinh` bật/tắt về sau; danh sách trang và
+trạng thái bật được **lưu**, khởi động lại HA vẫn chạy tiếp.
+
+```yaml
+- action: dosen_pro.screen_carousel
+  data:
+    seconds: 10                       # thời lượng mặc định mỗi trang (3–3600 giây)
+    pages:
+      - {type: clock, seconds: 20}    # đồng hồ đầy đủ (tự cập nhật khi sang phút mới)
+      - type: card                    # thẻ thông tin: cùng trường với screen_card
+        title: "Điện năng lượng mặt trời"
+        main_entity: sensor.cong_suat_mat_troi
+        color: green
+        entities: [sensor.san_luong_hom_nay, sensor.dien_tieu_thu_nha]
+      - {type: camera, camera_entity: camera.cua, seconds: 8}     # camera trực tiếp
+```
+
+Tắt: `dosen_pro.screen_carousel` với `enabled: false` (hoặc tắt công tắc): lớp luân phiên được gỡ và màn về màn hình mặc định.
+
+| Loại trang | Trường |
+|---|---|
+| `clock` | (không có) đồng hồ đầy đủ như màn mặc định |
+| `card` | `title`, `main_entity`, `value`, `caption`, `color`, `entities`, `rows` (như `screen_card`) |
+| `text` | `title`, `messages`, `font_size` (như `screen_text`) |
+| `image` | `source`, `media` hoặc `image_entity` |
+| `video` | `source` hoặc `media`, `loop` (mặc định lặp) |
+| `camera` | `camera_entity` hoặc `source` (rtsp://…) |
+
+Mỗi trang có thể có `seconds` riêng. Tối đa 12 trang. Cách hoạt động:
+
+- Mỗi trang là một **lớp** của chủ `carousel`, nằm **dưới** mọi lớp sự kiện: cuộc gọi Zalo, chuông cửa, hội thoại Assist… vẫn đè lên;
+  hết sự kiện thì trang đang tới lượt hiện lại.
+- **Thẻ thông tin lấy số liệu mới mỗi lần hiện** và được vẽ lại ngay khi số liệu đổi trong lúc trang đang hiện; đồng hồ vẽ lại khi sang phút mới.
+  Không vẽ lại khi nội dung giống hệt, để màn không chập chờn.
+- Nếu HA chết giữa chừng, lớp luân phiên tự hết hạn (gấp 3 lần thời lượng trang) và màn về màn hình mặc định.
+
 ## Dịch vụ
 
-`dosen_pro.screen_show` (nguồn: `camera_entity`, `media`, hoặc gõ `source`), `screen_text`, `screen_card`, `screen_release`, `screen_default`,
+`dosen_pro.screen_show` (nguồn: `camera_entity`, `media`, hoặc gõ `source`), `screen_text`, `screen_card`, `screen_carousel`, `screen_release`, `screen_default`,
 `screen_off`, `screen_power`, `screen_sleep`, `speaker_play`, `speaker_stop`. Xem mô tả từng trường trong *Công cụ nhà phát triển → Dịch vụ*.
 
 ```yaml

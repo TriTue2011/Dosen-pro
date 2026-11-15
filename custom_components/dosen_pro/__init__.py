@@ -25,6 +25,7 @@ from .dosen_core.camera import Camera
 from .intercom import DosenIntercomView
 from .dosen_core.config import CamConfig
 from .card import build_card
+from .carousel import Carousel
 from .dosen_core.render import CARD_COLORS
 from .dosen_core.screen import FITS, ROTATIONS
 from .resolve import resolve_camera, resolve_image, resolve_media, resolve_source
@@ -43,6 +44,12 @@ _CARD_ROW = vol.Schema({
     vol.Optional("color"): vol.In(list(CARD_COLORS)),
 })
 SERVICE_SCHEMAS = {
+    "screen_carousel": vol.Schema({
+        vol.Optional("entry_id"): cv.string,
+        vol.Optional("pages"): vol.All(cv.ensure_list, [dict]),
+        vol.Optional("seconds"): vol.All(vol.Coerce(float), vol.Range(min=3, max=3600)),
+        vol.Optional("enabled", default=True): cv.boolean,
+    }),
     "screen_card": vol.Schema({
         vol.Optional("entry_id"): cv.string,
         vol.Optional("title", default=""): cv.string,
@@ -128,6 +135,7 @@ class DosenCoordinator(DataUpdateCoordinator):
         self.default_image = ""
         self.default_text = ""
         self.default_quality = "standard"        # chất lượng mã hoá hình lên màn camera (standard | high | max)
+        self.carousel: Carousel | None = None   # màn luân phiên (tạo khi nạp mục cấu hình)
         self.default_weather = ""                # thực thể weather.* hiện trên đồng hồ ("" = không hiện)
         self._unsub_weather = None
         self.default_rotate = 0                  # xoay hình (độ, theo chiều kim đồng hồ) cho mọi lớp không tự nêu
@@ -174,6 +182,10 @@ class DosenCoordinator(DataUpdateCoordinator):
         except DosenApiError as exc:
             raise HomeAssistantError(f"Dosen Pro: {exc}") from exc
         await self.async_request_refresh()
+
+    def hass_now_minute(self) -> str:
+        """Phút hiện tại theo múi giờ của HA (đồng hồ trong màn luân phiên chỉ vẽ lại khi giá trị này đổi)."""
+        return dt_util.now().strftime("%H%M")
 
     # ── Thời tiết trên đồng hồ ────────────────────────────────────────
 
@@ -321,6 +333,17 @@ async def _handle(hass: HomeAssistant, call: ServiceCall) -> None:
         elif call.service == "screen_text":
             await api.screen_text(d["title"], d["messages"], d["font_size"], d["after"], d["owner"],
                                   d.get("ttl"))
+        elif call.service == "screen_carousel":
+            car = coord.carousel
+            try:
+                car.configure(d.get("pages"), d.get("seconds"))
+            except vol.Invalid as exc:
+                raise HomeAssistantError(f"Trang luân phiên không hợp lệ: {exc}") from exc
+            if d["enabled"]:
+                await car.async_start()
+            else:
+                await car.async_stop()
+            coord.async_update_listeners()
         elif call.service == "screen_card":
             await api.screen_card(build_card(coord.hass, d), d["after"], d["owner"], d.get("ttl"))
         elif call.service == "screen_release":
@@ -372,6 +395,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     holder["coord"] = coord
     await coord.async_config_entry_first_refresh()
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coord
+    coord.carousel = Carousel(coord)
+    await coord.carousel.async_load()
     if not entry.data.get(CONF_INTERCOM_KEY):          # chưa có khoá bộ đàm (mục mới / vừa cấu hình lại): sinh một khoá
         hass.config_entries.async_update_entry(entry, data={**entry.data, CONF_INTERCOM_KEY: secrets.token_urlsafe(24)})
     if not hass.data.get(f"{DOMAIN}_view"):
@@ -394,6 +419,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(async_track_time_interval(          # dự báo cao/thấp đổi theo ngày: làm mới mỗi 30 phút
         hass, _refresh_weather, timedelta(minutes=30)))
     entry.async_create_background_task(hass, _apply_default_safe(coord), "dosen_pro default screen")
+    coord.carousel.resume_if_on()
     entry.async_create_background_task(hass, _read_audio_safe(coord), "dosen_pro read audio")
     return True
 
