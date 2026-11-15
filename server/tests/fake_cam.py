@@ -31,6 +31,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 from app import g711  # noqa: E402
 
 HOST, PORT = "127.0.0.1", 34567
+SCREEN_WORK = {"WorkMode": "Timing", "WorkTime": 30, "WorkLuminance": 60}   # Dev.ScreenWorkMode
 TALK_LOG = "/tmp/fake-cam-talk.bin"
 AVTALK_LOG = "/tmp/fake-cam-avtalk.log"   # claim JSON + one line per media packet
 
@@ -124,6 +125,14 @@ def handle(conn, addr):
                     session, seq))
             elif opcode == 1006:  # keepalive
                 send(json_chunk(1006, {"Ret": 100}, session, seq))
+            elif opcode == 1040:  # config set
+                req = json.loads(payload[:-2])
+                if req.get("Name") == "Dev.ScreenWorkMode":
+                    SCREEN_WORK.update(req["Dev.ScreenWorkMode"])
+                send(json_chunk(1040, {"Name": req.get("Name"), "Ret": 100}, session, seq))
+            elif opcode == 1042 and json.loads(payload[:-2]).get("Name") == "Dev.ScreenWorkMode":
+                send(json_chunk(1042, {"Name": "Dev.ScreenWorkMode", "Dev.ScreenWorkMode": dict(SCREEN_WORK),
+                                       "Ret": 100}, session, seq))
             elif opcode in (1042, 1360):  # config get
                 try:
                     req = json.loads(payload[:-2])

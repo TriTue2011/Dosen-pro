@@ -117,6 +117,43 @@ class Screen:
             self._session.close()
         self._sender = self._session = None
 
+    # -- how long the LCD stays lit (the app's "breath screen" setting) ---------
+    _SLEEP_KEY = "Dev.ScreenWorkMode"
+
+    def _control(self) -> DVRIPClient:
+        client = DVRIPClient(settings.cam_ip, settings.cam_port,
+                             settings.dvrip_connect_timeout, settings.dvrip_read_timeout)
+        try:
+            client.connect()
+            client.login(settings.cam_user, settings.cam_pass)
+        except Exception:
+            client.close()
+            raise
+        return client
+
+    def get_sleep(self) -> dict:
+        """The camera's own LCD timeout: work_time seconds the screen stays lit, 0 = never sleeps."""
+        client = self._control()
+        try:
+            cfg = client.get_config(self._SLEEP_KEY).get(self._SLEEP_KEY) or {}
+        finally:
+            client.close()
+        return {"work_mode": cfg.get("WorkMode"), "work_time": cfg.get("WorkTime"),
+                "luminance": cfg.get("WorkLuminance")}
+
+    def set_sleep(self, seconds: int) -> dict:
+        """Set the LCD timeout (0 = never sleeps). Same JSON the iCSee app sends:
+        {"WorkMode": "Timing", "WorkTime": seconds}."""
+        if not isinstance(seconds, int) or isinstance(seconds, bool) or not 0 <= seconds <= 3600:
+            raise ValueError("seconds must be an integer 0..3600 (0 = never sleeps)")
+        client = self._control()
+        try:
+            client.set_config(self._SLEEP_KEY, {"WorkMode": "Timing", "WorkTime": seconds})
+        finally:
+            client.close()
+        log.info("man hinh: dat thoi gian sang %ss", seconds)
+        return self.get_sleep()
+
     def audio_sink(self):
         """The running AVTalk sender (it has ``push_audio``), or None when the screen is off."""
         sender = self._sender

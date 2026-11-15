@@ -61,6 +61,9 @@ class DosenApi:
     async def screen_off(self) -> dict[str, Any]:
         return await self._call("POST", "/api/screen/off")
 
+    async def screen_sleep(self, seconds: int) -> dict[str, Any]:
+        return await self._call("POST", "/api/screen/sleep", {"seconds": seconds})
+
     async def speaker_play(self, source: str, volume: float = 1.0) -> dict[str, Any]:
         return await self._call("POST", "/api/speaker/play", {"source": source, "volume": volume})
 

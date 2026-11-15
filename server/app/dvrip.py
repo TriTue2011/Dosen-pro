@@ -301,6 +301,15 @@ class DVRIPClient:
         })
         return self.read_json()
 
+    def set_config(self, name: str, value: dict, opcode: int = OP_CONFIG_SET) -> dict:
+        """Generic config set: {"Name": name, "SessionID": ..., name: value}; raises on a bad Ret."""
+        self._write_json_cmd(opcode, {
+            "Name": name,
+            "SessionID": "0x%08X" % self.session,
+            name: value,
+        })
+        return self.read_json()
+
     def query_decoder_pram(self) -> dict | None:
         """Best-effort DecoderPram negotiation (AV-TALK-VIDEO-SEND.md SS2).
 

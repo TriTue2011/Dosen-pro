@@ -102,3 +102,14 @@ def test_speaker_uses_the_avtalk_audio_channel_while_the_screen_is_open(fake_cam
     finally:
         spk.stop()
         scr.off()
+
+
+def test_screen_sleep_get_and_set(fake_cam_avtalk):
+    scr = Screen()
+    first = scr.get_sleep()
+    assert first == {"work_mode": "Timing", "work_time": 30, "luminance": 60}
+    out = scr.set_sleep(0)                                   # 0 = không bao giờ tắt (như app: «Never»)
+    assert out["work_time"] == 0 and out["work_mode"] == "Timing" and out["luminance"] == 60
+    for bad in (-1, 3601, "5", None, True):
+        with pytest.raises(ValueError):
+            scr.set_sleep(bad)

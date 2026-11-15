@@ -433,6 +433,29 @@ def screen_status() -> dict:
     return _screen.status()
 
 
+@app.get("/api/screen/sleep")
+async def screen_sleep_get() -> Response:
+    """How long the camera LCD stays lit: {"work_mode", "work_time" (s, 0 = never), "luminance"}."""
+    try:
+        return JSONResponse(await asyncio.to_thread(_screen.get_sleep))
+    except (OSError, DVRIPError) as exc:
+        return _err(503, "camera_unreachable", f"screen sleep read failed: {exc}")
+
+
+@app.post("/api/screen/sleep")
+async def screen_sleep_set(request: Request) -> Response:
+    """Set how long the camera LCD stays lit: {"seconds": 0..3600}; 0 = never sleeps.
+    The screen shows our video only while it is awake."""
+    try:
+        body = await _json_body(request)
+        status = await asyncio.to_thread(_screen.set_sleep, body.get("seconds"))
+    except ValueError as exc:
+        return _err(400, "bad_params", str(exc))
+    except (OSError, DVRIPError) as exc:
+        return _err(503, "camera_unreachable", f"screen sleep set failed: {exc}")
+    return JSONResponse(status)
+
+
 @app.post("/api/speaker/play")
 async def speaker_play(request: Request) -> Response:
     """Play audio out of the camera speaker: {"source": "<file|URL|lavfi:..>",
