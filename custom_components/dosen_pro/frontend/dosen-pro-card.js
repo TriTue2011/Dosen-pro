@@ -287,7 +287,9 @@
       if (!card) return null;
       const out = { type: card.type, name: card.name };
       if (card.id) out.id = card.id;
-      for (const k of ["title", "caption", "main_entity", "color", "theme", "layout", "title_color", "camera_entity", "image_entity", "source"]) if (card[k]) out[k] = card[k];
+      // Mỗi loại thẻ chỉ lưu các trường của nó (thẻ camera/ảnh không mang theo màu, giao diện, bố cục của thẻ thông tin).
+      const FIELDS = { card: ["title", "caption", "main_entity", "color", "theme", "layout", "title_color"], camera: ["camera_entity"], image: ["image_entity", "source"], clock: [] };
+      for (const k of FIELDS[card.type] || []) if (card[k]) out[k] = card[k];
       if (card.type === "card") out.entities = (card.entities || []).filter((e) => e.entity).map((e) => { const r = { entity: e.entity }; if (e.name) r.name = e.name; if (e.color) r.color = e.color; return r; });
       return out;
     }
