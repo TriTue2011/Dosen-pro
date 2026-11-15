@@ -3,10 +3,12 @@ dùng làm camera và mic. Địa chỉ RTSP có mật khẩu nên chỉ trả q
 
 from __future__ import annotations
 
+from haffmpeg.camera import CameraMjpeg
 from homeassistant.components.camera import Camera, CameraEntityFeature
-from homeassistant.components.ffmpeg import async_get_image
+from homeassistant.components.ffmpeg import async_get_image, get_ffmpeg_manager
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_aiohttp_proxy_stream
 
 from .const import DOMAIN, RTSP_PORT, RTSP_STREAM, device_info
 
@@ -37,3 +39,17 @@ class DosenCamera(Camera):
 
     async def async_camera_image(self, width: int | None = None, height: int | None = None) -> bytes | None:
         return await async_get_image(self.hass, rtsp_url(self._entry.data), width=width, height=height)
+
+    async def handle_async_mjpeg_stream(self, request):
+        """Luồng MJPEG LIÊN TỤC từ RTSP của camera (một ffmpeg chạy suốt, đủ 12 fps của camera).
+
+        Mặc định của HA gọi ``async_camera_image`` cho TỪNG khung: mỗi lần mở lại RTSP bằng một ffmpeg mới (~1–2 s) nên bảng điều khiển / ảnh
+        thông báo / ``camera_proxy_stream`` chỉ được ~1 khung/giây, chậm hơn nhiều so với app iCSee (đo 15/11: RTSP camera ra 12 khung/giây)."""
+        manager = get_ffmpeg_manager(self.hass)
+        stream = CameraMjpeg(manager.binary)
+        await stream.open_camera(rtsp_url(self._entry.data), extra_cmd="-q:v 5")
+        try:
+            reader = await stream.get_reader()
+            return await async_aiohttp_proxy_stream(self.hass, request, reader, manager.ffmpeg_stream_content_type)
+        finally:
+            await stream.close()
