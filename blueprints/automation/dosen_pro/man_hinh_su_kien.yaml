@@ -31,9 +31,22 @@ blueprint:
             - {value: camera, label: "Camera trực tiếp (rtsp://…)"}
             - {value: anh, label: "Hình ảnh"}
             - {value: chu, label: "Dòng chữ"}
+    camera:
+      name: Camera (khi chọn «Camera trực tiếp»)
+      description: "Chọn camera trong danh sách của HA; luồng xem lấy tự động."
+      default: ""
+      selector:
+        entity:
+          domain: camera
+    media:
+      name: Video / hình (khi chọn «Video» hoặc «Hình ảnh»)
+      description: "Chọn tệp trong kho media của HA (hoặc tải lên)."
+      default: {}
+      selector:
+        media: {}
     nguon:
-      name: Nguồn (cho video / camera / hình)
-      description: "Đường dẫn tệp, URL http(s):// hoặc rtsp://. Camera của HA: dùng địa chỉ RTSP của chính camera."
+      name: Địa chỉ gõ tay (không bắt buộc)
+      description: "Nếu điền thì dùng thay cho ô chọn ở trên: URL http(s):// hoặc rtsp://."
       default: ""
       selector:
         text: {}
@@ -70,7 +83,9 @@ trigger: !input trigger
 condition: !input dieu_kien
 variables:
   kieu: !input kieu
+  media: !input media
   nguon: !input nguon
+  camera: !input camera
   lap: !input lap
   tieu_de: !input tieu_de
   noi_dung: !input noi_dung
@@ -85,10 +100,18 @@ action:
               {% set d = {'title': tieu_de, 'messages': [{'role': 'info', 'text': noi_dung}], 'owner': ten_lop, 'after': 'hold'} %}
               {% if thoi_gian | float(0) > 0 %}{% set d = dict(d, ttl=thoi_gian | float) %}{% endif %}
               {{ d }}
+      - conditions: "{{ kieu == 'camera' }}"
+        sequence:
+          - action: dosen_pro.screen_show
+            data: >-
+              {% set d = {'camera_entity': camera, 'owner': ten_lop, 'after': 'hold'} %}
+              {% if thoi_gian | float(0) > 0 %}{% set d = dict(d, ttl=thoi_gian | float) %}{% endif %}
+              {{ d }}
     default:
       - action: dosen_pro.screen_show
         data: >-
-          {% set d = {'source': nguon, 'loop': lap, 'owner': ten_lop,
-                      'after': 'hold' if (kieu in ['camera', 'anh'] or thoi_gian | float(0) > 0) else 'off'} %}
+          {% set d = {'loop': lap, 'owner': ten_lop,
+                      'after': 'hold' if (kieu == 'anh' or thoi_gian | float(0) > 0) else 'off'} %}
+          {% set d = dict(d, source=nguon) if nguon != '' else dict(d, media=media) %}
           {% if thoi_gian | float(0) > 0 %}{% set d = dict(d, ttl=thoi_gian | float) %}{% endif %}
           {{ d }}

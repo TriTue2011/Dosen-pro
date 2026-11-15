@@ -1,7 +1,59 @@
 {
   "config": {
-    "step": {"user": {"title": "Dosen Pro", "description": "Địa chỉ dịch vụ Docker Dosen Pro", "data": {"url": "Địa chỉ (http://máy:8080)", "api_key": "Khoá API (nếu có)"}}},
-    "error": {"cannot_connect": "Không nối được dịch vụ", "invalid_auth": "Khoá API sai"},
-    "abort": {"already_configured": "Đã cấu hình"}
+    "step": {
+      "user": {
+        "title": "Dosen Pro",
+        "description": "Địa chỉ dịch vụ Docker Dosen Pro",
+        "data": {
+          "url": "Địa chỉ (http://máy:8080)",
+          "api_key": "Khoá API (nếu có)"
+        }
+      },
+      "reconfigure": {
+        "title": "Cấu hình lại Dosen Pro",
+        "description": "Đổi địa chỉ dịch vụ hoặc khoá API",
+        "data": {
+          "url": "Địa chỉ (http://máy:8080)",
+          "api_key": "Khoá API (nếu có)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Không nối được dịch vụ",
+      "invalid_auth": "Khoá API sai"
+    },
+    "abort": {
+      "already_configured": "Đã cấu hình",
+      "reconfigure_successful": "Đã cấu hình lại"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Màn hình mặc định",
+        "description": "Màn hình hiện khi không có sự kiện nào đè lên. Chọn loại và nguồn theo danh sách của HA.",
+        "data": {
+          "default_mode": "Loại",
+          "default_camera": "Camera (loại «live»)",
+          "default_image": "Ảnh (loại «image»)",
+          "default_video": "Video (loại «video»)",
+          "alarm_events": "Nhận báo động camera (sự kiện dosen_pro_alarm)"
+        }
+      }
+    },
+    "error": {
+      "missing_source": "Loại này cần chọn nguồn"
+    }
+  },
+  "selector": {
+    "default_mode": {
+      "options": {
+        "off": "Tắt (về màn hình thường)",
+        "clock": "Đồng hồ",
+        "image": "Ảnh",
+        "video": "Video (lặp)",
+        "live": "Camera trực tiếp"
+      }
+    }
   }
 }

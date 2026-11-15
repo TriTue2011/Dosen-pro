@@ -146,8 +146,7 @@ async def test_entities_like_the_assist_camera_plus_screen(hass, aioclient_mock,
               "switch.dosen_pro_hien_hoi_thoai_tren_man_hinh", "sensor.dosen_pro_noi_dung_man_hinh",
               "button.dosen_pro_bat_man_hinh", "button.dosen_pro_tat_man_hinh",
               "button.dosen_pro_ve_man_hinh_mac_dinh", "button.dosen_pro_dung_loa",
-              "event.dosen_pro_su_kien_camera", "text.dosen_pro_nguon_man_hinh_mac_dinh",
-              "select.dosen_pro_man_hinh_mac_dinh"):
+              "event.dosen_pro_su_kien_camera", "select.dosen_pro_man_hinh_mac_dinh"):
         assert e in ids, (e, sorted(ids))
     assert any(i.startswith("select.dosen_pro") for i in ids)       # pipeline + độ nhạy nói xong
     # Bật/tắt nguồn màn hình là NÚT (camera không báo ngược trạng thái), không có công tắc.
@@ -200,15 +199,71 @@ async def test_buttons_and_default_screen_select(hass, aioclient_mock, monkeypat
     assert _posts(aioclient_mock, "/api/speaker/stop")
     st = hass.states.get("select.dosen_pro_man_hinh_mac_dinh")
     assert st.state == "clock" and set(st.attributes["options"]) == {"off", "clock", "image", "video", "live"}
-    # live cần nguồn: chưa nhập thì báo lỗi rõ ràng, nhập rồi mới áp dụng (nguồn nằm ở ô «Nguồn màn hình mặc định»)
+    # image/video/live cần nguồn đã chọn trong hộp «Cấu hình» (theo danh sách của HA): chưa chọn thì báo lỗi rõ ràng.
     from homeassistant.exceptions import HomeAssistantError
     with pytest.raises(HomeAssistantError):
         await hass.services.async_call("select", "select_option", {"entity_id": "select.dosen_pro_man_hinh_mac_dinh", "option": "live"}, blocking=True)
-    await hass.services.async_call("text", "set_value", {"entity_id": "text.dosen_pro_nguon_man_hinh_mac_dinh", "value": "rtsp://cam/3"}, blocking=True)
-    await hass.services.async_call("select", "select_option", {"entity_id": "select.dosen_pro_man_hinh_mac_dinh", "option": "live"}, blocking=True)
-    assert _posts(aioclient_mock, "/api/screen/default")[-1][2] == {"mode": "live", "source": "rtsp://cam/3"}
-    await hass.services.async_call("select", "select_option", {"entity_id": "select.dosen_pro_man_hinh_mac_dinh", "option": "off"}, blocking=True)
-    assert _posts(aioclient_mock, "/api/screen/default")[-1][2] == {"mode": "off", "source": ""}
+
+
+async def test_default_screen_chosen_in_options_from_ha_lists(hass, aioclient_mock, monkeypatch):
+    import custom_components.dosen_pro as pkg
+
+    async def fake_cam(hass_, entity_id):
+        return "rtsp://resolved/" + entity_id
+    monkeypatch.setattr(pkg, "resolve_camera", fake_cam)
+    entry = await _setup(hass, aioclient_mock, monkeypatch)
+    # Hộp Cấu hình: loại + nguồn cùng lúc, nguồn là camera trong danh sách của HA.
+    r = await hass.config_entries.options.async_init(entry.entry_id)
+    assert r["type"] == FlowResultType.FORM and r["step_id"] == "init"
+    r = await hass.config_entries.options.async_configure(r["flow_id"], {"default_mode": "live", "alarm_events": False})
+    assert r["type"] == FlowResultType.FORM and r["errors"] == {"default_camera": "missing_source"}   # live cần camera
+    r = await hass.config_entries.options.async_configure(r["flow_id"], {
+        "default_mode": "live", "default_camera": "camera.cua", "alarm_events": False})
+    assert r["type"] == FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    assert _posts(aioclient_mock, "/api/screen/default")[-1][2] == {"mode": "live", "source": "rtsp://resolved/camera.cua"}
+    # Ô chọn chỉ đổi loại, dùng nguồn đã chọn trong hộp Cấu hình.
+    await hass.services.async_call("select", "select_option", {"entity_id": "select.dosen_pro_man_hinh_mac_dinh", "option": "clock"}, blocking=True)
+    await hass.async_block_till_done()
+    assert _posts(aioclient_mock, "/api/screen/default")[-1][2] == {"mode": "clock", "source": ""}
+
+
+async def test_services_take_camera_and_media_from_ha_lists(hass, aioclient_mock, monkeypatch):
+    import custom_components.dosen_pro.resolve as res
+    await _setup(hass, aioclient_mock, monkeypatch)
+
+    async def fake_cam(h, e):
+        return "rtsp://r/" + e
+
+    async def fake_media(h, m):
+        return "http://signed/" + m["media_content_id"]
+    monkeypatch.setattr(res, "resolve_camera", fake_cam)
+    monkeypatch.setattr(res, "resolve_media", fake_media)
+    await hass.services.async_call(DOMAIN, "screen_show", {"camera_entity": "camera.cua", "owner": "c"}, blocking=True)
+    assert _posts(aioclient_mock, "/api/screen/show")[-1][2]["source"] == "rtsp://r/camera.cua"
+    await hass.services.async_call(DOMAIN, "screen_show", {"media": {"media_content_id": "m1"}}, blocking=True)
+    assert _posts(aioclient_mock, "/api/screen/show")[-1][2]["source"] == "http://signed/m1"
+    with pytest.raises(Exception):                       # phải có ít nhất một nguồn
+        await hass.services.async_call(DOMAIN, "screen_show", {"owner": "x"}, blocking=True)
+    await hass.services.async_call(DOMAIN, "screen_default", {"mode": "image", "media": {"media_content_id": "a"}}, blocking=True)
+    assert _posts(aioclient_mock, "/api/screen/default")[-1][2] == {"mode": "image", "source": "http://signed/a"}
+
+
+async def test_reconfigure_changes_url_and_key(hass, aioclient_mock, monkeypatch):
+    entry = await _setup(hass, aioclient_mock, monkeypatch)
+    new = "http://dosen.test:9090"
+    aioclient_mock.get(new + "/api/health", json={"status": "ok"})
+    aioclient_mock.get(new + "/api/status", json={"service": "x"})
+    aioclient_mock.get(new + "/api/screen/status", json=SCREEN)
+    aioclient_mock.get(new + "/api/speaker/status", json=SPEAKER)
+    aioclient_mock.get(new + "/api/events/stream", text="")
+    aioclient_mock.post(new + "/api/events/start", json={})
+    r = await entry.start_reconfigure_flow(hass)
+    assert r["type"] == FlowResultType.FORM and r["step_id"] == "reconfigure"
+    r = await hass.config_entries.flow.async_configure(r["flow_id"], {CONF_URL: new + "/", CONF_API_KEY: "k2"})
+    assert r["type"] == FlowResultType.ABORT and r["reason"] == "reconfigure_successful"
+    await hass.async_block_till_done()
+    assert entry.data[CONF_URL] == new and entry.data[CONF_API_KEY] == "k2"
 
 
 async def test_camera_alarms_become_bus_events_and_an_event_entity(hass, aioclient_mock, monkeypatch):

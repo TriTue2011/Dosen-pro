@@ -1,7 +1,11 @@
 screen_show:
   fields:
+    camera_entity:
+      selector:
+        entity: {domain: camera}
+    media:
+      selector: {media: {}}
     source:
-      required: true
       example: "http://192.168.1.10:8123/local/clip.mp4"
       selector: {text: {}}
     loop:
@@ -56,6 +60,11 @@ screen_default:
       selector:
         select:
           options: ["off", "clock", "image", "video", "live"]
+    camera_entity:
+      selector:
+        entity: {domain: camera}
+    media:
+      selector: {media: {}}
     source:
       selector: {text: {}}
     entry_id:

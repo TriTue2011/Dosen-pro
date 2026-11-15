@@ -16,26 +16,29 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import DosenApi, DosenApiError
-from .const import (CONF_ALARM_EVENTS, DEFAULT_MODES, CONF_API_KEY, CONF_URL, DOMAIN, EVENT_ALARM,
-                    SCAN_INTERVAL_SECONDS)
+from .const import (CONF_ALARM_EVENTS, CONF_API_KEY, CONF_URL, DEFAULT_MODES, DOMAIN, EVENT_ALARM,
+                    OPT_CAMERA, OPT_IMAGE, OPT_MODE, OPT_VIDEO, SCAN_INTERVAL_SECONDS)
+from .resolve import resolve_camera, resolve_media, resolve_source
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS = [Platform.ASSIST_SATELLITE, Platform.BUTTON, Platform.EVENT, Platform.MEDIA_PLAYER,
-             Platform.NUMBER, Platform.SELECT, Platform.SENSOR, Platform.SWITCH, Platform.TEXT]
+             Platform.NUMBER, Platform.SELECT, Platform.SENSOR, Platform.SWITCH]
 
 _MESSAGE = vol.Schema({
     vol.Optional("role", default="info"): vol.In(["user", "assistant", "caller", "info"]),
     vol.Required("text"): cv.string,
 })
 SERVICE_SCHEMAS = {
-    "screen_show": vol.Schema({
+    "screen_show": vol.All(vol.Schema({
         vol.Optional("entry_id"): cv.string,
-        vol.Required("source"): cv.string,
+        vol.Optional("source"): cv.string,
+        vol.Optional("camera_entity"): cv.entity_id,
+        vol.Optional("media"): vol.Any(cv.string, dict),
         vol.Optional("loop", default=False): cv.boolean,
         vol.Optional("after", default="off"): vol.In(["off", "hold"]),
         vol.Optional("owner", default="automation"): cv.string,
         vol.Optional("ttl"): vol.All(vol.Coerce(float), vol.Range(min=1, max=86400)),
-    }),
+    }), cv.has_at_least_one_key("source", "camera_entity", "media")),
     "screen_release": vol.Schema({
         vol.Optional("entry_id"): cv.string,
         vol.Required("owner"): cv.string,
@@ -44,6 +47,8 @@ SERVICE_SCHEMAS = {
         vol.Optional("entry_id"): cv.string,
         vol.Required("mode"): vol.In(DEFAULT_MODES),
         vol.Optional("source", default=""): cv.string,
+        vol.Optional("camera_entity"): cv.entity_id,
+        vol.Optional("media"): vol.Any(cv.string, dict),
     }),
     "screen_text": vol.Schema({
         vol.Optional("entry_id"): cv.string,
@@ -83,12 +88,28 @@ class DosenCoordinator(DataUpdateCoordinator):
         self.mic_muted = False
         self.mic_gain_db = 0.0
         self.show_chat = True
-        self.default_source = ""          # nguồn cho màn hình mặc định ảnh/video/live (đặt bởi thực thể text)
+        self.alarm_events_on = True
         self.mic_level_db: float | None = None   # mức tiếng mic gần nhất (dBFS), None = chưa có luồng
         self._on_level: list = []
         self._on_alarm: list = []
         self._on_mute: list = []
         self._on_gain: list = []
+
+    async def apply_default(self) -> None:
+        """Gửi màn hình mặc định đã chọn trong hộp «Cấu hình» xuống dịch vụ (nguồn lấy từ danh sách của HA).
+        Chưa từng chọn (không có khoá trong tuỳ chọn) thì không đụng tới mặc định dịch vụ đang lưu."""
+        o = self.entry.options
+        mode = o.get(OPT_MODE)
+        if mode is None:
+            return
+        url = ""
+        if mode == "live":
+            url = await resolve_camera(self.hass, o[OPT_CAMERA])
+        elif mode == "image":
+            url = await resolve_media(self.hass, o[OPT_IMAGE])
+        elif mode == "video":
+            url = await resolve_media(self.hass, o[OPT_VIDEO])
+        await self.api.screen_default(mode, url)
 
     @callback
     def set_mic_level(self, db: float | None) -> None:
@@ -172,15 +193,20 @@ async def _handle(hass: HomeAssistant, call: ServiceCall) -> None:
     api, d = coord.api, call.data
     try:
         if call.service == "screen_show":
-            await api.screen_show(d["source"], d["loop"], d["after"], d["owner"], d.get("ttl"))
+            url = await resolve_source(coord.hass, source=d.get("source"), camera_entity=d.get("camera_entity"),
+                                       media=d.get("media"))
+            await api.screen_show(url, d["loop"], d["after"], d["owner"], d.get("ttl"))
         elif call.service == "screen_text":
             await api.screen_text(d["title"], d["messages"], d["font_size"], d["after"], d["owner"],
                                   d.get("ttl"))
         elif call.service == "screen_release":
             await api.screen_release(d["owner"])
         elif call.service == "screen_default":
-            await api.screen_default(d["mode"], d["source"])
-            coord.default_source = d["source"] or coord.default_source
+            url = ""
+            if d["mode"] in ("image", "video", "live"):
+                url = await resolve_source(coord.hass, source=d.get("source"), camera_entity=d.get("camera_entity"),
+                                           media=d.get("media"))
+            await api.screen_default(d["mode"], url)
         elif call.service == "screen_off":
             await api.screen_off()
         elif call.service == "screen_power":
@@ -209,7 +235,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     if entry.options.get(CONF_ALARM_EVENTS, True):
         entry.async_create_background_task(hass, coord._alarm_loop(), "dosen_pro alarm events")
+    coord.alarm_events_on = bool(entry.options.get(CONF_ALARM_EVENTS, True))
+    entry.async_on_unload(entry.add_update_listener(_options_updated))
+    entry.async_create_background_task(hass, _apply_default_safe(coord), "dosen_pro default screen")
     return True
+
+
+async def _apply_default_safe(coord: DosenCoordinator) -> None:
+    try:
+        await coord.apply_default()
+    except (DosenApiError, HomeAssistantError, KeyError) as exc:
+        _LOGGER.warning("Không áp dụng được màn hình mặc định: %s", exc)
+
+
+async def _options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Tuỳ chọn đổi: bật/tắt luồng sự kiện cần nạp lại; còn lại chỉ áp dụng lại màn hình mặc định."""
+    coord = hass.data[DOMAIN].get(entry.entry_id)
+    if coord is None:
+        return
+    if bool(entry.options.get(CONF_ALARM_EVENTS, True)) != coord.alarm_events_on:
+        await hass.config_entries.async_reload(entry.entry_id)
+        return
+    await _apply_default_safe(coord)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

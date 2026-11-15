@@ -8,8 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import DosenApiError
-from .const import DEFAULT_MODES, DOMAIN, device_info
+from .const import DEFAULT_MODES, DOMAIN, OPT_CAMERA, OPT_IMAGE, OPT_MODE, OPT_VIDEO, device_info
 from .entity import DosenEntity
 
 
@@ -31,12 +30,12 @@ class DosenVadSelect(DosenEntity, VadSensitivitySelect):
 
 
 class DosenDefaultScreen(CoordinatorEntity, SelectEntity):
-    """Màn hình mặc định: hiện khi không có sự kiện nào đè lên (off = để màn hình về như bình thường)."""
+    """Màn hình mặc định: hiện khi không có sự kiện nào đè lên. Chọn nguồn (camera / ảnh / video) trong hộp
+    «Cấu hình» của tích hợp (theo danh sách của HA); ô này chỉ đổi loại."""
 
     _attr_has_entity_name = True
     _attr_name = "Màn hình mặc định"
     _attr_options = DEFAULT_MODES
-    _attr_translation_key = None
 
     def __init__(self, coordinator) -> None:
         super().__init__(coordinator)
@@ -48,11 +47,11 @@ class DosenDefaultScreen(CoordinatorEntity, SelectEntity):
         return ((self.coordinator.data or {}).get("screen", {}).get("default") or {}).get("mode")
 
     async def async_select_option(self, option: str) -> None:
-        src = self.coordinator.default_source
-        if option in ("image", "video", "live") and not src:
-            raise HomeAssistantError("Nhập «Nguồn màn hình mặc định» (ảnh, video hoặc rtsp://) trước")
-        try:
-            await self.coordinator.api.screen_default(option, src if option in ("image", "video", "live") else "")
-        except DosenApiError as exc:
-            raise HomeAssistantError(f"Dosen Pro: {exc}") from exc
-        await self.coordinator.async_request_refresh()
+        o = self.coordinator.entry.options
+        thieu = {"live": OPT_CAMERA, "image": OPT_IMAGE, "video": OPT_VIDEO}.get(option)
+        if thieu and not o.get(thieu):
+            raise HomeAssistantError(
+                "Chọn nguồn trước: Cài đặt → Thiết bị và dịch vụ → Dosen Pro → Cấu hình "
+                "(camera / ảnh / video theo danh sách của HA)")
+        # Lưu loại vào tuỳ chọn: trình nghe tuỳ chọn gửi xuống dịch vụ rồi.
+        self.hass.config_entries.async_update_entry(self.coordinator.entry, options={**o, OPT_MODE: option})

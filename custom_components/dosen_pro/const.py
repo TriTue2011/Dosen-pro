@@ -17,6 +17,11 @@ CONF_ALARM_EVENTS = "alarm_events"       # tuỳ chọn: false = không mở lu�
 EVENT_ALARM = "dosen_pro_alarm"           # sự kiện bus HA cho MỌI báo động camera đẩy tới
 DEFAULT_MODES = ["off", "clock", "image", "video", "live"]
 ASSIST_OWNER = "assist"
+# Tuỳ chọn của mục cấu hình (hộp «Cấu hình»): màn hình mặc định chọn theo danh sách của HA.
+OPT_MODE = "default_mode"          # off | clock | image | video | live
+OPT_CAMERA = "default_camera"      # entity camera trong HA (chế độ live)
+OPT_IMAGE = "default_image"        # bộ chọn media (chế độ image)
+OPT_VIDEO = "default_video"        # bộ chọn media (chế độ video)
 
 
 def device_info(entry_id: str) -> dict:

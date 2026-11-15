@@ -8,6 +8,14 @@
           "url": "URL (http://host:8080)",
           "api_key": "API key (if any)"
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Dosen Pro",
+        "description": "Change the service address or API key",
+        "data": {
+          "url": "URL (http://host:8080)",
+          "api_key": "API key (if any)"
+        }
       }
     },
     "error": {
@@ -15,7 +23,37 @@
       "invalid_auth": "Wrong API key"
     },
     "abort": {
-      "already_configured": "Already configured"
+      "already_configured": "Already configured",
+      "reconfigure_successful": "Reconfigured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Default screen",
+        "description": "What the screen shows when no event is on top. Pick the type and source from HA lists.",
+        "data": {
+          "default_mode": "Type",
+          "default_camera": "Camera (type live)",
+          "default_image": "Image (type image)",
+          "default_video": "Video (type video)",
+          "alarm_events": "Receive camera alarms (dosen_pro_alarm event)"
+        }
+      }
+    },
+    "error": {
+      "missing_source": "This type needs a source"
+    }
+  },
+  "selector": {
+    "default_mode": {
+      "options": {
+        "off": "Off",
+        "clock": "Clock",
+        "image": "Image",
+        "video": "Video (loop)",
+        "live": "Live camera"
+      }
     }
   }
 }

@@ -38,12 +38,22 @@ async def test_event_blueprint_shows_camera_with_ttl(hass, tmp_path):
     texts = async_mock_service(hass, "dosen_pro", "screen_text")
     await _auto(hass, "man_hinh_su_kien.yaml", {
         "trigger": [{"platform": "event", "event_type": "chuong_bam"}],
-        "kieu": "camera", "nguon": "rtsp://cam-cua/stream", "thoi_gian": 20, "ten_lop": "chuong_cua"}, tmp_path)
+        "kieu": "camera", "camera": "camera.cua", "thoi_gian": 20, "ten_lop": "chuong_cua"}, tmp_path)
     hass.bus.async_fire("chuong_bam")
     await hass.async_block_till_done()
-    assert len(shows) == 1 and shows[0].data == {"source": "rtsp://cam-cua/stream", "loop": False,
+    assert len(shows) == 1 and shows[0].data == {"camera_entity": "camera.cua",      # chọn camera theo danh sách của HA
                                                   "owner": "chuong_cua", "after": "hold", "ttl": 20.0}
     assert not texts
+
+
+async def test_event_blueprint_media_picker_and_manual_url(hass, tmp_path):
+    shows = async_mock_service(hass, "dosen_pro", "screen_show")
+    media = {"media_content_id": "media-source://media_source/local/chuong.mp4", "media_content_type": "video/mp4"}
+    await _auto(hass, "man_hinh_su_kien.yaml", {
+        "trigger": [{"platform": "event", "event_type": "bam"}], "kieu": "video", "media": media, "thoi_gian": 0}, tmp_path)
+    hass.bus.async_fire("bam")
+    await hass.async_block_till_done()
+    assert shows[-1].data["media"] == media and "source" not in shows[-1].data and shows[-1].data["after"] == "off"
 
 
 async def test_event_blueprint_text_without_ttl(hass, tmp_path):
