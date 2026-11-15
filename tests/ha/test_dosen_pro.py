@@ -491,3 +491,34 @@ _real_sleep = asyncio.sleep
 
 async def _fast_sleep(delay, *a, **k):
     await _real_sleep(0 if delay == 2 else delay, *a, **k)
+
+
+async def test_default_screen_is_retried_until_its_camera_exists(hass, monkeypatch, caplog):
+    """HA mới khởi động: camera go2rtc chưa nạp → lần áp đầu hỏng. Phải thử lại (không để màn camera tắt mãi)."""
+    from types import SimpleNamespace
+
+    async def fast(delay, *a, **k):
+        await _real_sleep(0)
+    monkeypatch.setattr(pkg.asyncio, "sleep", fast)
+
+    async def screen_view(rotate, fit):
+        return {}
+
+    class Coord:
+        default_rotate, default_fit = 0, "contain"
+        api = SimpleNamespace(screen_view=screen_view)
+
+        def __init__(self, fail_times):
+            self.n, self.fail = 0, fail_times
+
+        async def apply_default(self):
+            self.n += 1
+            if self.n <= self.fail:
+                raise HomeAssistantError("Không tìm thấy camera camera.go2rtc_cua")
+    c = Coord(3)
+    await pkg._apply_default_safe(c)
+    assert c.n == 4 and "Không áp dụng được" not in caplog.text                 # hỏng 3 lần rồi áp được
+    c = Coord(99)
+    await pkg._apply_default_safe(c)
+    assert c.n == len(pkg.DEFAULT_RETRY_DELAYS)                                  # bỏ cuộc sau số lần đã định
+    assert caplog.text.count("Không áp dụng được màn hình mặc định") == 1        # chỉ báo MỘT lần, không dội log

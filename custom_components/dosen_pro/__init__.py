@@ -331,12 +331,24 @@ async def _read_audio_safe(coord: DosenCoordinator) -> None:
         _LOGGER.debug("Chưa đọc được âm lượng camera: %s", exc)
 
 
+#: Lúc HA mới khởi động, camera/ảnh mà màn mặc định cần (vd. camera go2rtc) có thể chưa nạp kịp, hoặc camera còn giữ phiên
+#: cũ (Ret=503): thử lại với khoảng nghỉ tăng dần thay vì bỏ cuộc ngay (đo 15/11: bỏ cuộc → màn camera tắt mãi).
+DEFAULT_RETRY_DELAYS = (0, 5, 10, 20, 30, 60, 60)
+
+
 async def _apply_default_safe(coord: DosenCoordinator) -> None:
-    try:
-        await coord.api.screen_view(coord.default_rotate, coord.default_fit)     # khôi phục xoay/khung đã chọn trước khi tắt HA
-        await coord.apply_default()
-    except (DosenApiError, HomeAssistantError, KeyError) as exc:
-        _LOGGER.warning("Không áp dụng được màn hình mặc định: %s", exc)
+    last: Exception | None = None
+    for delay in DEFAULT_RETRY_DELAYS:
+        if delay:
+            await asyncio.sleep(delay)
+        try:
+            await coord.api.screen_view(coord.default_rotate, coord.default_fit)     # khôi phục xoay/khung đã chọn trước khi tắt HA
+            await coord.apply_default()
+            return
+        except (DosenApiError, HomeAssistantError, KeyError) as exc:
+            last = exc
+            _LOGGER.debug("Chưa áp dụng được màn hình mặc định (%s), thử lại", exc)
+    _LOGGER.warning("Không áp dụng được màn hình mặc định: %s", last)
 
 
 async def _options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
