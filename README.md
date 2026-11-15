@@ -83,7 +83,7 @@ Bố cục dọc 240×320, vẽ lại mỗi phút và mỗi khi thời tiết đ
 
 - thứ, ngày, **giờ lớn** (dấu hai chấm đỏ); chữ đen trên nền sáng, điểm nhấn đỏ, cho dễ đọc trên màn nhỏ;
 - **ngày lễ sắp tới** và «Còn N ngày» (hoặc «Hôm nay», «Ngày mai»): ngày lễ dương lịch và âm lịch của Việt Nam, kể cả Giao thừa;
-- **năm Can Chi**, tháng, **âm lịch** (có đánh dấu tháng nhuận), **số tuần**;
+- **năm Can Chi**, ngày/tháng **âm lịch** cỡ lớn màu đỏ (có đánh dấu tháng nhuận; dương lịch đã ở dòng trên cùng), **số tuần**;
 - **thời tiết**: biểu tượng (đổi theo ngày/đêm), nhiệt độ, tình trạng tiếng Việt, độ ẩm, thấp–cao trong ngày (lấy từ dự báo hằng ngày của
   thực thể, tự đổi °F sang °C). Chọn thực thể ở `select.dosen_pro_thoi_tiet_tren_dong_ho`; dự báo làm mới mỗi 30 phút.
 
