@@ -39,6 +39,10 @@ SERVICE_SCHEMAS = {
         vol.Optional("after", default="hold"): vol.In(["off", "hold"]),
     }),
     "screen_off": vol.Schema({vol.Optional("entry_id"): cv.string}),
+    "screen_power": vol.Schema({
+        vol.Optional("entry_id"): cv.string,
+        vol.Required("on"): cv.boolean,
+    }),
     "screen_sleep": vol.Schema({
         vol.Optional("entry_id"): cv.string,
         vol.Required("seconds"): vol.All(vol.Coerce(int), vol.Range(min=0, max=3600)),
@@ -88,6 +92,8 @@ async def _handle(hass: HomeAssistant, call: ServiceCall) -> None:
             await api.screen_text(d["title"], d["messages"], d["font_size"], d["after"])
         elif call.service == "screen_off":
             await api.screen_off()
+        elif call.service == "screen_power":
+            await api.screen_power(d["on"])
         elif call.service == "screen_sleep":
             await api.screen_sleep(d["seconds"])
         elif call.service == "speaker_play":

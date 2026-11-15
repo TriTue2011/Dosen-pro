@@ -61,6 +61,9 @@ class DosenApi:
     async def screen_off(self) -> dict[str, Any]:
         return await self._call("POST", "/api/screen/off")
 
+    async def screen_power(self, on: bool) -> dict[str, Any]:
+        return await self._call("POST", "/api/screen/power", {"on": on})
+
     async def screen_sleep(self, seconds: int) -> dict[str, Any]:
         return await self._call("POST", "/api/screen/sleep", {"seconds": seconds})
 

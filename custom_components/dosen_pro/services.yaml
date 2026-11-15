@@ -36,6 +36,14 @@ screen_off:
   fields:
     entry_id:
       selector: {text: {}}
+screen_power:
+  fields:
+    'on':
+      required: true
+      default: true
+      selector: {boolean: {}}
+    entry_id:
+      selector: {text: {}}
 screen_sleep:
   fields:
     seconds:

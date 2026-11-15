@@ -18,7 +18,7 @@ def _mock_api(aioclient_mock, status=200):
     aioclient_mock.get(URL + "/api/status", status=status, json={"service": "x"})
     aioclient_mock.get(URL + "/api/screen/status", json=SCREEN)
     aioclient_mock.get(URL + "/api/speaker/status", json=SPEAKER)
-    for p in ("screen/show", "screen/text", "screen/off", "screen/sleep", "speaker/play", "speaker/stop"):
+    for p in ("screen/show", "screen/text", "screen/off", "screen/sleep", "screen/power", "speaker/play", "speaker/stop"):
         aioclient_mock.post(URL + "/api/" + p, json={})
 
 
@@ -68,6 +68,8 @@ async def test_services_call_the_api(hass, aioclient_mock):
     assert _posts(aioclient_mock, "/api/screen/show")[-1][2] == {"source": "http://x/clip.mp4", "loop": True, "after": "off"}
     await hass.services.async_call(DOMAIN, "screen_off", {}, blocking=True)
     assert _posts(aioclient_mock, "/api/screen/off")
+    await hass.services.async_call(DOMAIN, "screen_power", {"on": True}, blocking=True)
+    assert _posts(aioclient_mock, "/api/screen/power")[-1][2] == {"on": True}
     await hass.services.async_call(DOMAIN, "screen_sleep", {"seconds": 0}, blocking=True)
     assert _posts(aioclient_mock, "/api/screen/sleep")[-1][2] == {"seconds": 0}
     await hass.services.async_call(DOMAIN, "speaker_play", {"source": "http://x/a.mp3", "volume": 0.5}, blocking=True)

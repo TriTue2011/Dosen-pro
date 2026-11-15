@@ -77,6 +77,8 @@ OP_AVTALK_START_REPLY = 1416
 OP_AVTALK_CLAIM = 1417
 OP_AVTALK_REPLY = 1418
 OP_AVTALK_DATA = 1419
+# OPMachine (EDEV_JSON_ID.OPMACHINE in the iCSee app): machine commands such as the LCD power switch.
+OP_MACHINE = 1450
 OP_ALARM_SET = 1500   # AlarmSet -- subscribe to alarm push (BUTTON-PRESS-EVENT.md §4)
 OP_ALARM_INFO = 1504  # AlarmInfo -- camera pushes JSON alarm events here
 
@@ -300,6 +302,15 @@ class DVRIPClient:
             "SessionID": "0x%08X" % self.session,
         })
         return self.read_json()
+
+    def screen_power_cmd(self, on: bool) -> None:
+        """Send the LCD power command without waiting for the reply. Decoded from the iCSee app
+        (MonitorBottomPresenter.setDevScreenOpen): OPScreenSwitchControl on OPMachine (1450)."""
+        self._write_json_cmd(OP_MACHINE, {
+            "Name": "OPScreenSwitchControl",
+            "SessionID": "0x%08X" % self.session,
+            "OPScreenSwitchControl": {"ScreenStatus": bool(on)},
+        })
 
     def set_config(self, name: str, value: dict, opcode: int = OP_CONFIG_SET) -> dict:
         """Generic config set: {"Name": name, "SessionID": ..., name: value}; raises on a bad Ret."""

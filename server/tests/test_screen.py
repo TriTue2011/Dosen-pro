@@ -113,3 +113,21 @@ def test_screen_sleep_get_and_set(fake_cam_avtalk):
     for bad in (-1, 3601, "5", None, True):
         with pytest.raises(ValueError):
             scr.set_sleep(bad)
+
+
+def test_screen_open_wakes_the_lcd_and_power_api_works(fake_cam_avtalk):
+    scr = Screen()
+    try:
+        scr.show_text("t", ["x"])
+        assert _wait(lambda: any(l.startswith("power ") for l in open(fake_cam_avtalk).read().splitlines()))
+        lines = open(fake_cam_avtalk).read().splitlines()
+        assert 'power {"ScreenStatus": true}' in lines          # tự bật màn khi mở phiên hiển thị
+        i_power = next(i for i, l in enumerate(lines) if l.startswith("power "))
+        i_media = next(i for i, l in enumerate(lines) if l.startswith("media "))
+        assert i_power < i_media                                 # bật trước khi gửi hình
+        assert scr.power(False) == {"screen_power": False, "ret": 100}
+        assert scr.power(True)["screen_power"] is True
+        with pytest.raises(ValueError):
+            scr.power("on")
+    finally:
+        scr.off()

@@ -43,6 +43,9 @@ class Settings:
     # Optional shared secret for the HTTP API (X-API-Key or Bearer). Empty = open.
     api_key: str = os.environ.get("API_KEY", "")
 
+    # Switch the camera LCD on whenever a screen session opens (it ignores video while asleep).
+    screen_auto_wake: bool = os.environ.get("SCREEN_AUTO_WAKE", "1") not in ("0", "false", "no")
+
     # HTTP API.
     api_host: str = os.environ.get("API_HOST", "0.0.0.0")
     api_port: int = _int("API_PORT", 8080)

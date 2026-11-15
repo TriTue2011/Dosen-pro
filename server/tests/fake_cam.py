@@ -125,6 +125,11 @@ def handle(conn, addr):
                     session, seq))
             elif opcode == 1006:  # keepalive
                 send(json_chunk(1006, {"Ret": 100}, session, seq))
+            elif opcode == 1450:  # OPMachine: LCD power switch (OPScreenSwitchControl)
+                req = json.loads(payload[:-2])
+                with open(AVTALK_LOG, "a") as f:
+                    f.write("power %s\n" % json.dumps(req.get("OPScreenSwitchControl")))
+                send(json_chunk(1450, {"Name": req.get("Name"), "Ret": 100}, session, seq))
             elif opcode == 1040:  # config set
                 req = json.loads(payload[:-2])
                 if req.get("Name") == "Dev.ScreenWorkMode":

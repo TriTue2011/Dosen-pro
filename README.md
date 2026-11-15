@@ -22,7 +22,7 @@ phát nhạc và TTS ra loa, nghe mic.
 Thực thể: `media_player.dosen_pro_loa` (phát URL, TTS, kho media của HA), `sensor.dosen_pro_man_hinh` (off/video/image/text).
 Dịch vụ `dosen_pro.screen_show`, `screen_text`, `screen_off`, `screen_sleep`, `speaker_play`, `speaker_stop`.
 
-**Màn hình camera chỉ hiện hình khi đang sáng.** `dosen_pro.screen_sleep` đặt thời gian màn hình sáng của chính camera (cài đặt «màn hình thở» của app iCSee, cấu hình `Dev.ScreenWorkMode`): `seconds: 0` = không bao giờ tắt, ví dụ `seconds: 60` = sáng 1 phút rồi ngủ. Muốn hình lên bất cứ lúc nào thì đặt 0.
+**Màn hình camera chỉ hiện hình khi đang sáng.** Mỗi lần mở phiên hiển thị, dịch vụ tự bật nguồn màn hình (lệnh `OPScreenSwitchControl`, như nút «Nguồn điện màn hình: Bật» của app; tắt tự động bằng `SCREEN_AUTO_WAKE=0`). `dosen_pro.screen_power` bật/tắt nguồn màn hình thủ công. `dosen_pro.screen_sleep` đặt thời gian màn hình sáng của chính camera (cài đặt «màn hình thở» của app iCSee, cấu hình `Dev.ScreenWorkMode`): `seconds: 0` = không bao giờ tắt, ví dụ `seconds: 60` = sáng 1 phút rồi ngủ. Muốn hình lên bất cứ lúc nào thì đặt 0.
 
 ```yaml
 # Chuông cửa: hình camera cửa lên màn, kèm tiếng chuông

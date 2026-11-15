@@ -433,6 +433,19 @@ def screen_status() -> dict:
     return _screen.status()
 
 
+@app.post("/api/screen/power")
+async def screen_power(request: Request) -> Response:
+    """Switch the camera LCD on/off: {"on": true}. The app's "Nguồn điện màn hình" Bật/Tắt."""
+    try:
+        body = await _json_body(request)
+        status = await asyncio.to_thread(_screen.power, body.get("on"))
+    except ValueError as exc:
+        return _err(400, "bad_params", str(exc))
+    except (OSError, DVRIPError) as exc:
+        return _err(503, "camera_unreachable", f"screen power failed: {exc}")
+    return JSONResponse(status)
+
+
 @app.get("/api/screen/sleep")
 async def screen_sleep_get() -> Response:
     """How long the camera LCD stays lit: {"work_mode", "work_time" (s, 0 = never), "luminance"}."""

@@ -103,6 +103,12 @@ class Screen:
             settings.cam_pass, settings.dvrip_connect_timeout,
             settings.dvrip_read_timeout)
         session.open(self.width, self.height, self.fps)
+        if settings.screen_auto_wake and session.control is not None:
+            # The LCD ignores video while it sleeps: switch it on, like the app's "Bật" button.
+            try:
+                session.control.screen_power_cmd(True)
+            except OSError as exc:
+                log.warning("man hinh: khong gui duoc lenh bat man hinh: %s", exc)
         sender = avtalk.AVTalkSender(session, self.width, self.height, self.fps)
         sender.start()
         self._session, self._sender = session, sender
@@ -153,6 +159,21 @@ class Screen:
             client.close()
         log.info("man hinh: dat thoi gian sang %ss", seconds)
         return self.get_sleep()
+
+    def power(self, on: bool) -> dict:
+        """Switch the camera LCD on or off (the app's "Nguồn điện màn hình" Bật / Tắt)."""
+        if not isinstance(on, bool):
+            raise ValueError("on must be true or false")
+        client = self._control()
+        try:
+            client._write_json_cmd(1450, {
+                "Name": "OPScreenSwitchControl", "SessionID": "0x%08X" % client.session,
+                "OPScreenSwitchControl": {"ScreenStatus": on}})
+            reply = client.read_json()
+        finally:
+            client.close()
+        log.info("man hinh: nguon man hinh %s", "bat" if on else "tat")
+        return {"screen_power": on, "ret": reply.get("Ret")}
 
     def audio_sink(self):
         """The running AVTalk sender (it has ``push_audio``), or None when the screen is off."""
