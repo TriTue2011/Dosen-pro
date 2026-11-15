@@ -17,12 +17,12 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import DosenApi, DosenApiError
 from .const import (CONF_ALARM_EVENTS, CONF_API_KEY, CONF_URL, DEFAULT_MODES, DOMAIN, EVENT_ALARM,
-                    OPT_CAMERA, OPT_IMAGE, OPT_MODE, OPT_VIDEO, SCAN_INTERVAL_SECONDS)
-from .resolve import resolve_camera, resolve_media, resolve_source
+                    OPT_HA_URL, SCAN_INTERVAL_SECONDS)
+from .resolve import resolve_camera, resolve_image, resolve_media, resolve_source
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS = [Platform.ASSIST_SATELLITE, Platform.BUTTON, Platform.EVENT, Platform.MEDIA_PLAYER,
-             Platform.NUMBER, Platform.SELECT, Platform.SENSOR, Platform.SWITCH]
+             Platform.NUMBER, Platform.SELECT, Platform.SENSOR, Platform.SWITCH, Platform.TEXT]
 
 _MESSAGE = vol.Schema({
     vol.Optional("role", default="info"): vol.In(["user", "assistant", "caller", "info"]),
@@ -89,27 +89,48 @@ class DosenCoordinator(DataUpdateCoordinator):
         self.mic_gain_db = 0.0
         self.show_chat = True
         self.alarm_events_on = True
+        # Màn hình mặc định (đặt bởi các thực thể select/text trên thiết bị, khôi phục sau khi khởi động lại).
+        self.default_mode: str | None = None
+        self.default_camera = ""
+        self.default_image = ""
+        self.default_text = ""
         self.mic_level_db: float | None = None   # mức tiếng mic gần nhất (dBFS), None = chưa có luồng
         self._on_level: list = []
         self._on_alarm: list = []
         self._on_mute: list = []
         self._on_gain: list = []
 
+    @property
+    def ha_base(self) -> str | None:
+        return (self.entry.options.get(OPT_HA_URL) or "").strip() or None
+
     async def apply_default(self) -> None:
-        """Gửi màn hình mặc định đã chọn trong hộp «Cấu hình» xuống dịch vụ (nguồn lấy từ danh sách của HA).
-        Chưa từng chọn (không có khoá trong tuỳ chọn) thì không đụng tới mặc định dịch vụ đang lưu."""
-        o = self.entry.options
-        mode = o.get(OPT_MODE)
+        """Gửi màn hình mặc định (loại + nguồn chọn trên các thực thể) xuống dịch vụ. Chưa từng chọn loại thì
+        không đụng tới mặc định dịch vụ đang lưu. Lỗi được ném ra để người dùng thấy trên giao diện."""
+        mode = self.default_mode
         if mode is None:
             return
         url = ""
+        base = self.ha_base
         if mode == "live":
-            url = await resolve_camera(self.hass, o[OPT_CAMERA])
+            if not (self.default_camera or self.default_text):
+                raise HomeAssistantError("Chọn camera ở ô «Camera mặc định» (hoặc nhập địa chỉ rtsp:// ở ô «Địa chỉ mặc định»)")
+            url = await (resolve_camera(self.hass, self.default_camera, base) if self.default_camera
+                         else resolve_source(self.hass, source=self.default_text, base=base))
         elif mode == "image":
-            url = await resolve_media(self.hass, o[OPT_IMAGE])
+            if not (self.default_image or self.default_text):
+                raise HomeAssistantError("Chọn ảnh ở ô «Ảnh mặc định» (hoặc nhập địa chỉ ở ô «Địa chỉ mặc định»)")
+            url = await resolve_source(self.hass, image_entity=self.default_image or None,
+                                       source=self.default_text, base=base)
         elif mode == "video":
-            url = await resolve_media(self.hass, o[OPT_VIDEO])
-        await self.api.screen_default(mode, url)
+            if not self.default_text:
+                raise HomeAssistantError("Nhập địa chỉ video ở ô «Địa chỉ mặc định»")
+            url = await resolve_source(self.hass, source=self.default_text, base=base)
+        try:
+            await self.api.screen_default(mode, url)
+        except DosenApiError as exc:
+            raise HomeAssistantError(f"Dosen Pro: {exc}") from exc
+        await self.async_request_refresh()
 
     @callback
     def set_mic_level(self, db: float | None) -> None:
@@ -131,9 +152,11 @@ class DosenCoordinator(DataUpdateCoordinator):
         """Mở phiên báo động trên dịch vụ rồi đọc luồng SSE; mỗi báo động thành một sự kiện bus
         ``dosen_pro_alarm`` (để blueprint/automation bắt, kể cả nút gọi của camera khi biết tên event).
         Đứt thì nghỉ 30 giây rồi nối lại, để không dồn dập đăng nhập camera."""
+        wait = 30
         while True:
             try:
                 await self.api.events_start()
+                wait = 30
                 async for ev in self.api.events_stream():
                     payload = {"entry_id": self.entry.entry_id, "event": ev.get("event"),
                                "status": (ev.get("alarm") or {}).get("Status"), "alarm": ev.get("alarm"),
@@ -143,7 +166,8 @@ class DosenCoordinator(DataUpdateCoordinator):
                         fn(payload)
             except DosenApiError as exc:
                 _LOGGER.debug("alarm stream: %s", exc)
-            await asyncio.sleep(30)
+                wait = min(wait * 2, 600)       # camera từ chối thì thưa dần (tối đa 10 phút), đừng dồn dập đăng nhập
+            await asyncio.sleep(wait)
 
     @callback
     def set_mic_muted(self, muted: bool) -> None:
@@ -194,7 +218,7 @@ async def _handle(hass: HomeAssistant, call: ServiceCall) -> None:
     try:
         if call.service == "screen_show":
             url = await resolve_source(coord.hass, source=d.get("source"), camera_entity=d.get("camera_entity"),
-                                       media=d.get("media"))
+                                       media=d.get("media"), base=coord.ha_base)
             await api.screen_show(url, d["loop"], d["after"], d["owner"], d.get("ttl"))
         elif call.service == "screen_text":
             await api.screen_text(d["title"], d["messages"], d["font_size"], d["after"], d["owner"],
@@ -205,7 +229,7 @@ async def _handle(hass: HomeAssistant, call: ServiceCall) -> None:
             url = ""
             if d["mode"] in ("image", "video", "live"):
                 url = await resolve_source(coord.hass, source=d.get("source"), camera_entity=d.get("camera_entity"),
-                                           media=d.get("media"))
+                                           media=d.get("media"), base=coord.ha_base)
             await api.screen_default(d["mode"], url)
         elif call.service == "screen_off":
             await api.screen_off()
@@ -249,14 +273,8 @@ async def _apply_default_safe(coord: DosenCoordinator) -> None:
 
 
 async def _options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Tuỳ chọn đổi: bật/tắt luồng sự kiện cần nạp lại; còn lại chỉ áp dụng lại màn hình mặc định."""
-    coord = hass.data[DOMAIN].get(entry.entry_id)
-    if coord is None:
-        return
-    if bool(entry.options.get(CONF_ALARM_EVENTS, True)) != coord.alarm_events_on:
-        await hass.config_entries.async_reload(entry.entry_id)
-        return
-    await _apply_default_safe(coord)
+    """Tuỳ chọn đổi (luồng sự kiện, địa chỉ HA): nạp lại mục để áp dụng."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

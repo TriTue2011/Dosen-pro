@@ -30,29 +30,12 @@
   "options": {
     "step": {
       "init": {
-        "title": "Màn hình mặc định",
-        "description": "Màn hình hiện khi không có sự kiện nào đè lên. Chọn loại và nguồn theo danh sách của HA.",
+        "title": "Dosen Pro",
+        "description": "Màn hình mặc định chọn ngay trên thiết bị (ô «Màn hình mặc định», «Camera mặc định», «Ảnh mặc định», «Địa chỉ mặc định»).",
         "data": {
-          "default_mode": "Loại",
-          "default_camera": "Camera (loại «live»)",
-          "default_image": "Ảnh (loại «image»)",
-          "default_video": "Video (loại «video»)",
-          "alarm_events": "Nhận báo động camera (sự kiện dosen_pro_alarm)"
+          "alarm_events": "Nhận báo động camera (sự kiện dosen_pro_alarm)",
+          "ha_url": "Địa chỉ HA cho dịch vụ tải ảnh/video (tuỳ chọn)"
         }
-      }
-    },
-    "error": {
-      "missing_source": "Loại này cần chọn nguồn"
-    }
-  },
-  "selector": {
-    "default_mode": {
-      "options": {
-        "off": "Tắt (về màn hình thường)",
-        "clock": "Đồng hồ",
-        "image": "Ảnh",
-        "video": "Video (lặp)",
-        "live": "Camera trực tiếp"
       }
     }
   }

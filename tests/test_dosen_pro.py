@@ -146,7 +146,9 @@ async def test_entities_like_the_assist_camera_plus_screen(hass, aioclient_mock,
               "switch.dosen_pro_hien_hoi_thoai_tren_man_hinh", "sensor.dosen_pro_noi_dung_man_hinh",
               "button.dosen_pro_bat_man_hinh", "button.dosen_pro_tat_man_hinh",
               "button.dosen_pro_ve_man_hinh_mac_dinh", "button.dosen_pro_dung_loa",
-              "event.dosen_pro_su_kien_camera", "select.dosen_pro_man_hinh_mac_dinh"):
+              "event.dosen_pro_su_kien_camera", "select.dosen_pro_man_hinh_mac_dinh",
+              "select.dosen_pro_camera_mac_dinh", "select.dosen_pro_anh_mac_dinh",
+              "text.dosen_pro_dia_chi_mac_dinh"):
         assert e in ids, (e, sorted(ids))
     assert any(i.startswith("select.dosen_pro") for i in ids)       # pipeline + độ nhạy nói xong
     # Bật/tắt nguồn màn hình là NÚT (camera không báo ngược trạng thái), không có công tắc.
@@ -199,43 +201,57 @@ async def test_buttons_and_default_screen_select(hass, aioclient_mock, monkeypat
     assert _posts(aioclient_mock, "/api/speaker/stop")
     st = hass.states.get("select.dosen_pro_man_hinh_mac_dinh")
     assert st.state == "clock" and set(st.attributes["options"]) == {"off", "clock", "image", "video", "live"}
-    # image/video/live cần nguồn đã chọn trong hộp «Cấu hình» (theo danh sách của HA): chưa chọn thì báo lỗi rõ ràng.
+    # live/image/video cần nguồn: chưa chọn thì báo lỗi rõ ràng và KHÔNG đổi loại.
     from homeassistant.exceptions import HomeAssistantError
-    with pytest.raises(HomeAssistantError):
-        await hass.services.async_call("select", "select_option", {"entity_id": "select.dosen_pro_man_hinh_mac_dinh", "option": "live"}, blocking=True)
+    for mode in ("live", "image", "video"):
+        with pytest.raises(HomeAssistantError):
+            await hass.services.async_call("select", "select_option", {"entity_id": "select.dosen_pro_man_hinh_mac_dinh", "option": mode}, blocking=True)
+    assert not _posts(aioclient_mock, "/api/screen/default")
+    assert hass.states.get("select.dosen_pro_man_hinh_mac_dinh").state == "clock"        # vẫn như cũ
 
 
-async def test_default_screen_chosen_in_options_from_ha_lists(hass, aioclient_mock, monkeypatch):
+async def test_default_screen_is_set_with_entities_from_ha_lists(hass, aioclient_mock, monkeypatch):
     import custom_components.dosen_pro as pkg
+    calls = []
 
-    async def fake_cam(hass_, entity_id):
+    async def fake_cam(h, entity_id, base=None):
+        calls.append(("cam", entity_id))
         return "rtsp://resolved/" + entity_id
+
+    async def fake_source(h, *, source=None, image_entity=None, base=None, **kw):
+        calls.append(("src", image_entity or source))
+        return "http://signed/" + (image_entity or source)
     monkeypatch.setattr(pkg, "resolve_camera", fake_cam)
-    entry = await _setup(hass, aioclient_mock, monkeypatch)
-    # Hộp Cấu hình: loại + nguồn cùng lúc, nguồn là camera trong danh sách của HA.
-    r = await hass.config_entries.options.async_init(entry.entry_id)
-    assert r["type"] == FlowResultType.FORM and r["step_id"] == "init"
-    r = await hass.config_entries.options.async_configure(r["flow_id"], {"default_mode": "live", "alarm_events": False})
-    assert r["type"] == FlowResultType.FORM and r["errors"] == {"default_camera": "missing_source"}   # live cần camera
-    r = await hass.config_entries.options.async_configure(r["flow_id"], {
-        "default_mode": "live", "default_camera": "camera.cua", "alarm_events": False})
-    assert r["type"] == FlowResultType.CREATE_ENTRY
-    await hass.async_block_till_done()
+    monkeypatch.setattr(pkg, "resolve_source", fake_source)
+    await _setup(hass, aioclient_mock, monkeypatch)
+    hass.states.async_set("camera.cua", "idle")                      # camera trong danh sách của HA
+    hass.states.async_set("image.thoi_tiet", "2026-11-15")           # thực thể ảnh trong danh sách của HA
+    cam = hass.states.get("select.dosen_pro_camera_mac_dinh")
+    assert "camera.cua" in cam.attributes["options"] and cam.state == "—"                  # chọn theo entity
+    assert "image.thoi_tiet" in hass.states.get("select.dosen_pro_anh_mac_dinh").attributes["options"]
+    sel = lambda ent, opt: hass.services.async_call("select", "select_option", {"entity_id": ent, "option": opt}, blocking=True)
+    await sel("select.dosen_pro_camera_mac_dinh", "camera.cua")                           # chọn camera: chưa áp dụng (loại đang là clock)
+    assert not _posts(aioclient_mock, "/api/screen/default")
+    await sel("select.dosen_pro_man_hinh_mac_dinh", "live")                               # chọn loại: áp dụng với camera đã chọn
     assert _posts(aioclient_mock, "/api/screen/default")[-1][2] == {"mode": "live", "source": "rtsp://resolved/camera.cua"}
-    # Ô chọn chỉ đổi loại, dùng nguồn đã chọn trong hộp Cấu hình.
-    await hass.services.async_call("select", "select_option", {"entity_id": "select.dosen_pro_man_hinh_mac_dinh", "option": "clock"}, blocking=True)
-    await hass.async_block_till_done()
-    assert _posts(aioclient_mock, "/api/screen/default")[-1][2] == {"mode": "clock", "source": ""}
+    await sel("select.dosen_pro_anh_mac_dinh", "image.thoi_tiet")
+    await sel("select.dosen_pro_man_hinh_mac_dinh", "image")
+    assert _posts(aioclient_mock, "/api/screen/default")[-1][2] == {"mode": "image", "source": "http://signed/image.thoi_tiet"}
+    await hass.services.async_call("text", "set_value", {"entity_id": "text.dosen_pro_dia_chi_mac_dinh", "value": "/local/clip.mp4"}, blocking=True)
+    await sel("select.dosen_pro_man_hinh_mac_dinh", "video")                              # video: dùng địa chỉ gõ tay
+    assert _posts(aioclient_mock, "/api/screen/default")[-1][2] == {"mode": "video", "source": "http://signed//local/clip.mp4"}
+    await sel("select.dosen_pro_man_hinh_mac_dinh", "off")
+    assert _posts(aioclient_mock, "/api/screen/default")[-1][2] == {"mode": "off", "source": ""}
 
 
 async def test_services_take_camera_and_media_from_ha_lists(hass, aioclient_mock, monkeypatch):
     import custom_components.dosen_pro.resolve as res
     await _setup(hass, aioclient_mock, monkeypatch)
 
-    async def fake_cam(h, e):
+    async def fake_cam(h, e, base=None):
         return "rtsp://r/" + e
 
-    async def fake_media(h, m):
+    async def fake_media(h, m, base=None):
         return "http://signed/" + m["media_content_id"]
     monkeypatch.setattr(res, "resolve_camera", fake_cam)
     monkeypatch.setattr(res, "resolve_media", fake_media)
@@ -304,3 +320,29 @@ async def test_mic_level_sensor_follows_the_satellite_stream(hass, aioclient_moc
     coord.set_mic_level(None)
     await hass.async_block_till_done()
     assert hass.states.get("sensor.dosen_pro_muc_mic").state == "unknown"
+
+
+async def test_options_flow_has_only_infrastructure_choices(hass, aioclient_mock, monkeypatch):
+    entry = await _setup(hass, aioclient_mock, monkeypatch)
+    r = await hass.config_entries.options.async_init(entry.entry_id)
+    assert r["type"] == FlowResultType.FORM and set(r["data_schema"].schema) == {
+        vol_key for vol_key in r["data_schema"].schema if str(vol_key) in ("alarm_events", "ha_url")}
+    r = await hass.config_entries.options.async_configure(r["flow_id"], {"alarm_events": False, "ha_url": "http://192.168.1.5:8123"})
+    assert r["type"] == FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    assert entry.options["ha_url"] == "http://192.168.1.5:8123"
+
+
+async def test_resolve_uses_ha_url_option_and_explains_when_no_address(hass, monkeypatch):
+    from homeassistant.exceptions import HomeAssistantError
+    from homeassistant.helpers.network import NoURLAvailableError
+
+    from custom_components.dosen_pro import resolve
+    assert await async_setup_component(hass, "http", {})
+    url = resolve._absolute(hass, "/local/a.png", base="http://192.168.1.5:8123/")       # «Địa chỉ HA» do người dùng đặt
+    assert url.startswith("http://192.168.1.5:8123/local/a.png?authSig=")
+    assert resolve._absolute(hass, "rtsp://cam/1") == "rtsp://cam/1"                      # địa chỉ ngoài giữ nguyên
+    assert resolve._absolute(hass, "/local/a.png").startswith("http")                    # HA tự chọn nội bộ rồi địa chỉ ngoài
+    monkeypatch.setattr(resolve, "get_url", lambda *a, **k: (_ for _ in ()).throw(NoURLAvailableError()))
+    with pytest.raises(HomeAssistantError, match="Địa chỉ HA"):                           # không có địa chỉ nào: nói rõ phải làm gì
+        resolve._absolute(hass, "/local/a.png")

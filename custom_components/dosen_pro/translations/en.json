@@ -30,29 +30,12 @@
   "options": {
     "step": {
       "init": {
-        "title": "Default screen",
-        "description": "What the screen shows when no event is on top. Pick the type and source from HA lists.",
+        "title": "Dosen Pro",
+        "description": "The default screen is set on the device itself (Default screen, Default camera, Default image, Default address).",
         "data": {
-          "default_mode": "Type",
-          "default_camera": "Camera (type live)",
-          "default_image": "Image (type image)",
-          "default_video": "Video (type video)",
-          "alarm_events": "Receive camera alarms (dosen_pro_alarm event)"
+          "alarm_events": "Receive camera alarms (dosen_pro_alarm event)",
+          "ha_url": "HA address for the service to fetch images/videos (optional)"
         }
-      }
-    },
-    "error": {
-      "missing_source": "This type needs a source"
-    }
-  },
-  "selector": {
-    "default_mode": {
-      "options": {
-        "off": "Off",
-        "clock": "Clock",
-        "image": "Image",
-        "video": "Video (loop)",
-        "live": "Live camera"
       }
     }
   }

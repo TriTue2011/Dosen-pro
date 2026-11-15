@@ -178,6 +178,7 @@ class DosenSatellite(DosenEntity, AssistSatelliteEntity):
     async def _doc_mic(self) -> None:
         """ffmpeg đọc luồng mic của dịch vụ liên tục; đứt thì mở lại."""
         api = self._data.api
+        loi = 0                                  # số lần mở mic hỏng liên tiếp (để giãn nhịp thử lại)
         while True:
             lenh = [get_ffmpeg_manager(self.hass).binary, "-nostdin", "-hide_banner", "-loglevel", "error"]
             if api.mic_headers:
@@ -191,6 +192,7 @@ class DosenSatellite(DosenEntity, AssistSatelliteEntity):
             try:
                 while True:
                     khuc = await proc.stdout.readexactly(MIC_CHUNK)
+                    loi = 0
                     n += 1
                     if n % 8 == 0:                                   # ~2 lần/giây: cho cảm biến «Mức mic»
                         self._data.set_mic_level(muc_db(khuc))
@@ -210,7 +212,10 @@ class DosenSatellite(DosenEntity, AssistSatelliteEntity):
             if self._mo_lai_mic:
                 self._mo_lai_mic = False
             else:
-                await asyncio.sleep(5)       # mic camera đóng (camera bận/khoá đăng nhập): đừng dồn dập đăng nhập
+                # Camera từ chối / dịch vụ tắt: thưa dần 5 s → 10 → 20 … tối đa 5 phút. Mỗi lần mở mic là một lần
+                # đăng nhập camera: thử dồn dập có thể làm camera khoá tài khoản lâu hơn.
+                loi += 1
+                await asyncio.sleep(min(300, 5 * 2 ** (loi - 1)))
 
     # ── Hiện hội thoại trên màn camera ──────────────────────────────
 

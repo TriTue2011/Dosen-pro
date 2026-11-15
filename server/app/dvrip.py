@@ -115,6 +115,46 @@ def parse_alarm_info(payload: bytes) -> dict | None:
     return reply
 
 
+class LoginGuard:
+    """Protects the camera from a login storm. When the camera refuses a login (wrong password, account
+    locked: Ret 203/204/205/206...), further logins are refused HERE, without touching the camera, for a
+    cooldown that doubles on every consecutive refusal (30 s ... 30 min). Repeated attempts against a
+    camera that is already refusing can keep its lock-out going (seen on a DOSEN RPO V1: Ret=205).
+    A successful login resets it."""
+
+    REFUSED = (203, 204, 205, 206, 207)
+    BASE_S, MAX_S = 30.0, 1800.0
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._until = 0.0
+        self._fails = 0
+        self._ret = 0
+
+    def check(self) -> None:
+        with self._lock:
+            left = self._until - time.monotonic()
+            if left > 0:
+                raise DVRIPError(f"login paused for {left:.0f} s: the camera refused the last login "
+                                 f"(Ret={self._ret}); not trying again so it is not locked longer")
+
+    def refused(self, ret: int) -> None:
+        with self._lock:
+            self._fails += 1
+            self._ret = ret
+            self._until = time.monotonic() + min(self.MAX_S, self.BASE_S * 2 ** (self._fails - 1))
+
+    def ok(self) -> None:
+        with self._lock:
+            self._fails, self._until = 0, 0.0
+
+    def reset(self) -> None:
+        self.ok()
+
+
+login_guard = LoginGuard()
+
+
 class DVRIPError(Exception):
     """Any DVRIP protocol / transport error."""
 
@@ -255,14 +295,24 @@ class DVRIPClient:
 
     # -- session -------------------------------------------------------
     def login(self, user: str, password: str) -> dict:
-        """Login (opcode 1000). Returns the login reply dict."""
+        """Login (opcode 1000). Returns the login reply dict. Goes through ``login_guard``: after the
+        camera refuses a login, new ones are refused locally for a growing cooldown."""
+        login_guard.check()
         self._write_json_cmd(OP_LOGIN, {
             "EncryptType": "MD5",
             "LoginType": "DVRIP-Web",
             "PassWord": sofia_hash(password),
             "UserName": user,
         })
-        reply = self.read_json()
+        try:
+            reply = self.read_json()
+        except DVRIPError as exc:
+            import re
+            m = re.search(r"Ret=(\d+)", str(exc))
+            if m and int(m.group(1)) in LoginGuard.REFUSED:
+                login_guard.refused(int(m.group(1)))
+            raise
+        login_guard.ok()
         session_id = reply.get("SessionID")
         if isinstance(session_id, str):
             try:

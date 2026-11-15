@@ -287,3 +287,33 @@ def test_wire_sender_raises():
         sender.send_control("video_pause")
     with pytest.raises(WireProtocolNotImplemented):
         sender.close()
+
+
+def test_login_guard_stops_a_login_storm_after_the_camera_refuses():
+    """Camera trả Ret=205 (khoá): các lần đăng nhập kế tiếp bị chặn ngay tại dịch vụ, không chạm camera."""
+    from app.dvrip import DVRIPClient, DVRIPError, login_guard
+
+    class _Fake(DVRIPClient):
+        calls = 0
+
+        def _write_json_cmd(self, opcode, obj):
+            _Fake.calls += 1
+
+        def read_json(self):
+            raise DVRIPError("camera returned Ret=205: {'Ret': 205}")
+
+    login_guard.reset()
+    try:
+        with pytest.raises(DVRIPError, match="Ret=205"):
+            _Fake("127.0.0.1").login("u", "p")                  # lần đầu: hỏi camera, bị từ chối
+        assert _Fake.calls == 1
+        for _ in range(5):
+            with pytest.raises(DVRIPError, match="login paused"):
+                _Fake("127.0.0.1").login("u", "p")              # các lần sau: chặn, KHÔNG gửi gì
+        assert _Fake.calls == 1
+        login_guard._until = 0.0                                # hết thời gian chờ: được thử lại một lần
+        with pytest.raises(DVRIPError, match="Ret=205"):
+            _Fake("127.0.0.1").login("u", "p")
+        assert _Fake.calls == 2 and login_guard._fails == 2     # lần từ chối thứ hai: chờ lâu gấp đôi
+    finally:
+        login_guard.reset()

@@ -63,10 +63,11 @@ Dịch vụ `dosen_pro.screen_show` (nguồn chọn theo danh sách: `camera_ent
 
 Màn hình camera hoạt động theo **lớp**:
 
-- **Màn hình mặc định**: chọn trong hộp **Cấu hình** của tích hợp (Cài đặt → Thiết bị và dịch vụ → Dosen Pro → Cấu hình), **loại và nguồn cùng lúc,
-  nguồn lấy từ danh sách của HA**: `clock` (đồng hồ), `image` (chọn ảnh trong kho media), `video` (chọn video trong kho media, lặp),
-  `live` (chọn một camera trong HA, luồng xem lấy tự động), `off`. Lưu lại, khởi động lại vẫn áp dụng. Sau đó đổi loại nhanh bằng
-  `select.dosen_pro_man_hinh_mac_dinh` (dùng nguồn đã chọn). Đổi địa chỉ dịch vụ hoặc khoá API: ⋮ → **Cấu hình lại**.
+- **Màn hình mặc định**: đặt ngay trên thiết bị bằng các thực thể (không cần vào hộp Cấu hình):
+  `select.dosen_pro_man_hinh_mac_dinh` (loại: tắt, đồng hồ, ảnh, video lặp, camera trực tiếp), rồi nguồn:
+  `select.dosen_pro_camera_mac_dinh` (chọn **theo danh sách camera trong HA**), `select.dosen_pro_anh_mac_dinh` (chọn **theo danh sách thực thể ảnh**),
+  `text.dosen_pro_dia_chi_mac_dinh` (gõ địa chỉ video/ảnh/rtsp:// hoặc đường dẫn HA như `/local/anh.png`). Chọn loại chưa có nguồn thì báo lỗi rõ ràng
+  và không đổi. Lưu lại, khởi động lại vẫn áp dụng. Đổi địa chỉ dịch vụ hoặc khoá API: ⋮ → **Cấu hình lại**.
 - **Sự kiện** (dịch vụ `screen_show`, `screen_text` với `owner` và `ttl`): lớp **gần nhất đè lên**; hết video / hết `ttl` / `screen_release`
   thì màn hình **về lớp bên dưới**, hết lớp thì về màn hình mặc định. Cùng `owner` thì thay nhau, khác thì xếp chồng.
 - **Assist** tự chiếu hội thoại lên màn (lớp `assist`, mặc định bật, tắt ở `switch.dosen_pro_hien_hoi_thoai_tren_man_hinh`).

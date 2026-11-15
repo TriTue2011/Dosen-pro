@@ -10,8 +10,7 @@ from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import DosenApi, DosenApiError, DosenAuthError
-from .const import (CONF_ALARM_EVENTS, CONF_API_KEY, CONF_URL, DEFAULT_MODES, DOMAIN, OPT_CAMERA,
-                    OPT_IMAGE, OPT_MODE, OPT_VIDEO)
+from .const import CONF_ALARM_EVENTS, CONF_API_KEY, CONF_URL, DOMAIN, OPT_HA_URL
 
 
 async def _kiem_tra(hass, url: str, api_key: str) -> str | None:
@@ -76,28 +75,14 @@ class DosenConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class DosenOptionsFlow(config_entries.OptionsFlow):
-    """Hộp «Cấu hình»: chọn màn hình mặc định (loại + nguồn cùng lúc, nguồn lấy từ danh sách của HA)."""
+    """Hộp «Cấu hình»: chỉ các mục hạ tầng. Màn hình mặc định là THỰC THỂ trên thiết bị (ô chọn loại, camera, ảnh)."""
 
     async def async_step_init(self, user_input=None):
-        errors: dict[str, str] = {}
-        opts = self.config_entry.options
         if user_input is not None:
-            mode = user_input.get(OPT_MODE, "off")
-            thieu = {"live": OPT_CAMERA, "image": OPT_IMAGE, "video": OPT_VIDEO}.get(mode)
-            if thieu and not user_input.get(thieu):
-                errors[thieu] = "missing_source"
-            else:
-                return self.async_create_entry(data={**opts, **user_input})
-        def moi(key, sel, default=None):
-            kw = {"suggested_value": (user_input or opts).get(key, default)}
-            return vol.Optional(key, description=kw), sel
-        schema = vol.Schema(dict([
-            (vol.Required(OPT_MODE, default=opts.get(OPT_MODE, "off")), selector.SelectSelector(
-                selector.SelectSelectorConfig(options=DEFAULT_MODES, translation_key="default_mode",
-                                              mode=selector.SelectSelectorMode.DROPDOWN))),
-            moi(OPT_CAMERA, selector.EntitySelector(selector.EntitySelectorConfig(domain="camera"))),
-            moi(OPT_IMAGE, selector.MediaSelector(selector.MediaSelectorConfig(accept=["image/*"]))),
-            moi(OPT_VIDEO, selector.MediaSelector(selector.MediaSelectorConfig(accept=["video/*"]))),
-            (vol.Required(CONF_ALARM_EVENTS, default=opts.get(CONF_ALARM_EVENTS, True)), selector.BooleanSelector()),
-        ]))
-        return self.async_show_form(step_id="init", data_schema=schema, errors=errors)
+            return self.async_create_entry(data={**self.config_entry.options, **user_input})
+        opts = self.config_entry.options
+        schema = vol.Schema({
+            vol.Required(CONF_ALARM_EVENTS, default=opts.get(CONF_ALARM_EVENTS, True)): selector.BooleanSelector(),
+            vol.Optional(OPT_HA_URL, description={"suggested_value": opts.get(OPT_HA_URL, "")}): selector.TextSelector(),
+        })
+        return self.async_show_form(step_id="init", data_schema=schema)

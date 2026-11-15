@@ -18,10 +18,8 @@ EVENT_ALARM = "dosen_pro_alarm"           # sự kiện bus HA cho MỌI báo đ
 DEFAULT_MODES = ["off", "clock", "image", "video", "live"]
 ASSIST_OWNER = "assist"
 # Tuỳ chọn của mục cấu hình (hộp «Cấu hình»): màn hình mặc định chọn theo danh sách của HA.
-OPT_MODE = "default_mode"          # off | clock | image | video | live
-OPT_CAMERA = "default_camera"      # entity camera trong HA (chế độ live)
-OPT_IMAGE = "default_image"        # bộ chọn media (chế độ image)
-OPT_VIDEO = "default_video"        # bộ chọn media (chế độ video)
+OPT_HA_URL = "ha_url"              # địa chỉ HA mà dịch vụ Docker dùng để tải ảnh/video (nếu HA chưa có địa chỉ nội bộ)
+NONE_OPTION = "—"                  # «chưa chọn» trong các ô chọn camera/ảnh
 
 
 def device_info(entry_id: str) -> dict:
