@@ -570,15 +570,22 @@ class DVRIPClient:
             "SessionID": "0x%08X" % self.session,
         })
 
-    def drain_forever(self, stop_event: threading.Event) -> None:
+    def drain_forever(self, stop_event: threading.Event, on_chunk=None) -> None:
         """Read-and-discard loop for the talk connection (go2rtc
-        Backchannel.Start does the same). Ends on error or stop_event."""
+        Backchannel.Start does the same). Ends on error or stop_event.
+        ``on_chunk(opcode, payload)`` (optional) sees every chunk except keepalive replies: what the camera
+        pushes unasked (a button press may arrive here while the screen is open)."""
         assert self.sock is not None
         self.sock.settimeout(1.0)
         while not stop_event.is_set():
             try:
-                self.read_chunk()
+                opcode, payload = self.read_chunk()
             except socket.timeout:
                 continue
             except (OSError, DVRIPError):
                 return
+            if on_chunk is not None and opcode not in (1006, 1007):
+                try:
+                    on_chunk(opcode, payload)
+                except Exception:                      # noqa: BLE001 — người nghe hỏng không được giết luồng đọc
+                    pass

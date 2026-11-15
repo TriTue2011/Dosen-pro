@@ -39,8 +39,6 @@ SERVICE_SCHEMAS = {
         vol.Optional("camera_entity"): cv.entity_id,
         vol.Optional("media"): vol.Any(cv.string, dict),
         vol.Optional("loop", default=False): cv.boolean,
-        vol.Optional("rotate"): vol.All(vol.Coerce(int), vol.In(ROTATIONS)),
-        vol.Optional("fit"): vol.In(FITS),
         vol.Optional("after", default="off"): vol.In(["off", "hold"]),
         vol.Optional("owner", default="automation"): cv.string,
         vol.Optional("ttl"): vol.All(vol.Coerce(float), vol.Range(min=1, max=86400)),
@@ -233,7 +231,7 @@ async def _handle(hass: HomeAssistant, call: ServiceCall) -> None:
         if call.service == "screen_show":
             url = await resolve_source(coord.hass, source=d.get("source"), camera_entity=d.get("camera_entity"),
                                        media=d.get("media"), base=coord.ha_base)
-            await api.screen_show(url, d["loop"], d["after"], d["owner"], d.get("ttl"), d.get("rotate"), d.get("fit"))
+            await api.screen_show(url, d["loop"], d["after"], d["owner"], d.get("ttl"))
         elif call.service == "screen_text":
             await api.screen_text(d["title"], d["messages"], d["font_size"], d["after"], d["owner"],
                                   d.get("ttl"))

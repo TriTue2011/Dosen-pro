@@ -71,27 +71,6 @@ blueprint:
       default: 30
       selector:
         number: {min: 0, max: 3600, unit_of_measurement: "s", mode: box}
-    xoay:
-      name: Xoay hình (video, camera, hình ảnh)
-      description: "Xoay theo chiều kim đồng hồ để hình ngang vừa màn dọc. Không áp cho dòng chữ."
-      default: mac_dinh
-      selector:
-        select:
-          options:
-            - {value: mac_dinh, label: "Theo mặc định của màn hình"}
-            - {value: "0", label: "Không xoay"}
-            - {value: "90", label: "Xoay 90°"}
-            - {value: "180", label: "Xoay 180°"}
-            - {value: "270", label: "Xoay 270°"}
-    khung:
-      name: Kiểu khung hình
-      default: mac_dinh
-      selector:
-        select:
-          options:
-            - {value: mac_dinh, label: "Theo mặc định của màn hình"}
-            - {value: contain, label: "Vừa khung (có viền đen)"}
-            - {value: cover, label: "Lấp đầy màn (cắt rìa)"}
     ten_lop:
       name: Tên lớp
       description: "Cùng tên thì thay nhau; ví dụ «chuong_cua», «nguoi_la». Đừng dùng «assist» và «zalo_call» (dành cho Assist và cuộc gọi Zalo)."
@@ -112,8 +91,6 @@ variables:
   noi_dung: !input noi_dung
   thoi_gian: !input thoi_gian
   ten_lop: !input ten_lop
-  xoay: !input xoay
-  khung: !input khung
 action:
   - choose:
       - conditions: "{{ kieu == 'chu' }}"
@@ -129,8 +106,6 @@ action:
             data: >-
               {% set d = {'camera_entity': camera, 'owner': ten_lop, 'after': 'hold'} %}
               {% if thoi_gian | float(0) > 0 %}{% set d = dict(d, ttl=thoi_gian | float) %}{% endif %}
-              {% if xoay != 'mac_dinh' %}{% set d = dict(d, rotate=xoay | int) %}{% endif %}
-              {% if khung != 'mac_dinh' %}{% set d = dict(d, fit=khung) %}{% endif %}
               {{ d }}
     default:
       - action: dosen_pro.screen_show
@@ -139,6 +114,4 @@ action:
                       'after': 'hold' if (kieu == 'anh' or thoi_gian | float(0) > 0) else 'off'} %}
           {% set d = dict(d, source=nguon) if nguon != '' else dict(d, media=media) %}
           {% if thoi_gian | float(0) > 0 %}{% set d = dict(d, ttl=thoi_gian | float) %}{% endif %}
-          {% if xoay != 'mac_dinh' %}{% set d = dict(d, rotate=xoay | int) %}{% endif %}
-          {% if khung != 'mac_dinh' %}{% set d = dict(d, fit=khung) %}{% endif %}
           {{ d }}

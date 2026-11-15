@@ -5,7 +5,7 @@ from __future__ import annotations
 from .audio import MicSession, TalkSession
 from .config import CamConfig
 from .dvrip import DVRIPClient
-from .events import AlarmSession
+from .events import AlarmSession, other_record
 from .screen import Screen
 from .speaker import Speaker
 
@@ -15,7 +15,7 @@ class Camera:
         self.cfg = cfg
         self.talk = TalkSession(cfg)
         self.mic = MicSession(cfg)
-        self.screen = Screen(cfg, now)
+        self.screen = Screen(cfg, now, (lambda src, op, data: on_alarm(other_record(src, op, data))) if on_alarm else None)
         self.speaker = Speaker(self.talk, self.screen, cfg.ffmpeg)
         self.events = AlarmSession(cfg, on_alarm)
 

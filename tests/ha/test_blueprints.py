@@ -108,23 +108,3 @@ async def test_call_button_blueprint_answers_or_dials(hass, tmp_path):
     hass.bus.async_fire("zalo_call_call_state", {"state": "ended"})
     await hass.async_block_till_done()
     assert hass.states.get("input_boolean.co_goi").state == "off"
-
-
-async def test_event_blueprint_passes_rotation_and_fit_only_when_chosen(hass, tmp_path):
-    shows = async_mock_service(hass, "dosen_pro", "screen_show")
-    await _auto(hass, "man_hinh_su_kien.yaml", {
-        "trigger": [{"platform": "event", "event_type": "xoay_thu"}], "kieu": "camera", "camera": "camera.cua",
-        "thoi_gian": 0, "xoay": "90", "khung": "cover"}, tmp_path)
-    hass.bus.async_fire("xoay_thu")
-    await hass.async_block_till_done()
-    assert shows[-1].data["rotate"] == 90 and shows[-1].data["fit"] == "cover"       # xoay thành số, khung giữ chữ
-    assert shows[-1].data["camera_entity"] == "camera.cua"
-
-
-async def test_zalo_blueprint_video_can_be_rotated(hass, tmp_path):
-    shows = async_mock_service(hass, "dosen_pro", "screen_show")
-    async_mock_service(hass, "dosen_pro", "screen_text")
-    await _auto(hass, "man_hinh_cuoc_goi_zalo.yaml", {"video_url": "http://zalo:8090/v", "xoay": "270"}, tmp_path)
-    hass.bus.async_fire("zalo_call_call_state", {"state": "answered", "peer": "Bà"})
-    await hass.async_block_till_done()
-    assert shows[-1].data == {"source": "http://zalo:8090/v", "owner": "zalo_call", "after": "hold", "rotate": 270}

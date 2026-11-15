@@ -366,16 +366,14 @@ async def test_camera_volume_entities_read_and_write_the_camera(hass):
     assert hass.states.get("switch.dosen_pro_chong_on_mic_camera").state == "off"
 
 
-async def test_rotate_and_fit_reach_the_screen_through_services_and_selects(hass):
+async def test_rotate_and_fit_are_default_screen_settings_only(hass):
     await _setup(hass)
     cam = _cam()
-    await hass.services.async_call(DOMAIN, "screen_show", {"source": "http://x/a.mp4", "rotate": "90", "fit": "cover"},
-                                   blocking=True)
-    assert _calls("show")[-1]["rotate"] == 90 and _calls("show")[-1]["fit"] == "cover"
-    await hass.services.async_call(DOMAIN, "screen_show", {"source": "http://x/a.mp4"}, blocking=True)
-    assert "rotate" not in _calls("show")[-1] and "fit" not in _calls("show")[-1]          # không nêu = dùng mặc định
+    with pytest.raises(vol.Invalid):                                   # sự kiện không có tham số xoay
+        await hass.services.async_call(DOMAIN, "screen_show", {"source": "x", "rotate": 90}, blocking=True)
     with pytest.raises(vol.Invalid):
-        await hass.services.async_call(DOMAIN, "screen_show", {"source": "x", "rotate": 45}, blocking=True)
+        await hass.services.async_call(DOMAIN, "screen_default", {"mode": "live", "source": "rtsp://c", "rotate": 45},
+                                       blocking=True)
     await hass.services.async_call(DOMAIN, "screen_default", {"mode": "live", "source": "rtsp://c", "rotate": 270},
                                    blocking=True)
     assert _calls("default")[-1]["rotate"] == 270
@@ -387,3 +385,29 @@ async def test_rotate_and_fit_reach_the_screen_through_services_and_selects(hass
                                                                "option": "Lấp đầy (cắt rìa)"}, blocking=True)
     assert cam.screen.calls[-1] == ("view", {"rotate": 90, "fit": "cover"})
     assert hass.states.get("select.dosen_pro_kieu_khung_hinh_mac_dinh").state == "Lấp đầy (cắt rìa)"
+
+
+async def test_stt_audio_is_saved_with_the_recognised_text_for_diagnosis(hass):
+    """«Hỏi một đằng nghe một nẻo»: giữ lại đúng đoạn tiếng gửi bộ nhận giọng + chữ nó nghe ra + số đo."""
+    import os
+    import wave
+    from homeassistant.components.assist_pipeline import PipelineEvent, PipelineEventType
+    from homeassistant.components.assist_satellite.const import DOMAIN as AS_DOMAIN
+    await _setup(hass)
+    sat = hass.data[AS_DOMAIN].get_entity("assist_satellite.dosen_pro")
+    sat._ring.append((32767).to_bytes(2, "little", signed=True) * 1024)           # một khúc bị cắt đỉnh
+    sat.on_pipeline_event(PipelineEvent(PipelineEventType.STT_END, {"stt_output": {"text": "bật đèn bếp"}}))
+    await hass.async_block_till_done()
+    d = hass.config.path("dosen_pro_stt")
+    txt = ""
+    for _ in range(60):                                     # thư mục cấu hình của test dùng chung: chờ đúng lượt của test này
+        try:
+            txt = open(os.path.join(d, "last.txt"), encoding="utf-8").read()
+        except OSError:
+            txt = ""
+        if "bật đèn bếp" in txt:
+            break
+        await asyncio.sleep(0.05)
+    assert "nghe ra: bật đèn bếp" in txt and "ti_le_cat_dinh: 1.0000" in txt
+    with wave.open(os.path.join(d, "last.wav")) as w:
+        assert w.getframerate() == 16000 and w.getnframes() == 1024

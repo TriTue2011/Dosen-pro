@@ -49,6 +49,25 @@ _BUTTON_LIKE_EVENTS = ("LocalAlarm",)
 _MAX_EVENTS = 200
 
 
+def describe_chunk(payload: bytes) -> str:
+    """Nội dung một gói camera tự đẩy tới, để người đọc thấy được: chữ nếu là JSON/text, không thì hex."""
+    body = payload[:-2] if payload[-2:] == b"\n\x00" else payload
+    try:
+        text = body[:400].decode("utf-8")
+        if text.isprintable():
+            return text
+    except UnicodeDecodeError:
+        pass
+    return "hex:" + body[:200].hex()
+
+
+def other_record(source: str, opcode: int, payload: bytes) -> dict:
+    """Một gói KHÔNG phải báo động 1504 → bản ghi cùng dạng với báo động, tên sự kiện ``opcode_<số>``, để nút gọi
+    (hay bất cứ thứ gì camera đẩy tới bằng đường khác) vẫn hiện ở thực thể «Sự kiện camera» và trên bus HA."""
+    return {"event": f"opcode_{opcode}", "possible_button_press": False,
+            "alarm": {"Source": source, "Opcode": opcode, "Raw": describe_chunk(payload)}}
+
+
 class AlarmSession:
     """Listen for DVRIP alarm push events (opcode 1504) on one connection.
 
@@ -163,6 +182,11 @@ class AlarmSession:
             return
         text = payload[:200]
         log.info("alarm: goi khac opcode=%s payload=%r", opcode, text)
+        if self.on_event is not None:
+            try:
+                self.on_event(other_record("alarm", opcode, payload))
+            except Exception:                              # noqa: BLE001
+                log.exception("alarm: on_event failed")
         try:
             body = payload[:-2] if payload[-2:] == b"\n\x00" else payload
             ret = json.loads(body.decode("utf-8")).get("Ret")

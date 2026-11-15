@@ -18,10 +18,8 @@ class FakeScreen:
     def close(self):
         self.calls.append(("close",))
 
-    def show(self, source, loop, after, owner, ttl, rotate=None, fit=None):
-        self.calls.append(("show", {"source": source, "loop": loop, "after": after, "owner": owner, "ttl": ttl,
-                                    **({"rotate": rotate} if rotate is not None else {}),
-                                    **({"fit": fit} if fit is not None else {})}))
+    def show(self, source, loop, after, owner, ttl):
+        self.calls.append(("show", {"source": source, "loop": loop, "after": after, "owner": owner, "ttl": ttl}))
         return self._status
 
     def show_text(self, title, messages, font_size, after, owner, ttl):

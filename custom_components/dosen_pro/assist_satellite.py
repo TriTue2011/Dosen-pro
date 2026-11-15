@@ -11,9 +11,11 @@ from __future__ import annotations
 
 import array
 import asyncio
+import collections
 import contextlib
 import logging
 import math
+import wave
 from typing import Any
 
 from homeassistant.components import tts
@@ -72,6 +74,7 @@ class DosenSatellite(DosenEntity, AssistSatelliteEntity):
         self._vong: asyncio.Task | None = None
         self._mic_proc: asyncio.subprocess.Process | None = None
         self._mo_lai_mic = False
+        self._ring: collections.deque[bytes] = collections.deque(maxlen=int(20 * 16000 * 2 / MIC_CHUNK))  # ~20 s tiếng gần nhất
         self._chat: list[dict[str, str]] = []
         self._chat_task: asyncio.Task | None = None
         self._tat_task: asyncio.Task | None = None
@@ -173,6 +176,7 @@ class DosenSatellite(DosenEntity, AssistSatelliteEntity):
         while not self._hang.empty():
             self._hang.get_nowait()
         while (khuc := await self._hang.get()) is not None:
+            self._ring.append(khuc)
             yield khuc
 
     async def _doc_mic(self) -> None:
@@ -240,6 +244,29 @@ class DosenSatellite(DosenEntity, AssistSatelliteEntity):
             with contextlib.suppress(OSError, ConnectionError):
                 proc.stdin.close()
 
+    def _luu_tieng(self, pcm: bytes, nghe: str) -> None:
+        """Chẩn đoán «hỏi một đằng nghe một nẻo»: ghi tiếng ~20 s gần nhất đúng như bộ nhận giọng nhận được, cùng chữ nó
+        nghe ra và số đo (đỉnh, tỉ lệ bị cắt đỉnh). Chỉ giữ lượt gần nhất, nằm trong thư mục cấu hình của HA."""
+        try:
+            thu_muc = self.hass.config.path("dosen_pro_stt")
+            import os
+            os.makedirs(thu_muc, exist_ok=True)
+            a = array.array("h")
+            a.frombytes(pcm[: len(pcm) // 2 * 2])
+            dinh = max((abs(x) for x in a), default=0)
+            cat = sum(1 for x in a if abs(x) >= 32000) / max(len(a), 1)
+            with wave.open(os.path.join(thu_muc, "last.wav"), "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(MIC_RATE)
+                w.writeframes(pcm)
+            with open(os.path.join(thu_muc, "last.txt"), "w", encoding="utf-8") as f:
+                f.write(f"nghe ra: {nghe}\ntang_mic_db: {self._data.mic_gain_db}\ndinh: {dinh} "
+                        f"({20 * math.log10(max(dinh, 1) / 32768):.1f} dBFS)\nti_le_cat_dinh: {cat:.4f}\n"
+                        f"giay: {len(a) / MIC_RATE:.1f}\n")
+        except OSError as exc:
+            _LOGGER.debug("%s: không lưu được tiếng thử: %s", self.entity_id, exc)
+
     # ── Hiện hội thoại trên màn camera ──────────────────────────────
 
     def _chat_them(self, role: str, text: str, thay_dang_nghe: bool = True) -> None:
@@ -296,7 +323,9 @@ class DosenSatellite(DosenEntity, AssistSatelliteEntity):
         elif event.type is PipelineEventType.STT_START and not self._chat:
             self._chat_them("info", "Đang nghe…", thay_dang_nghe=False)
         elif event.type is PipelineEventType.STT_END:
-            self._chat_them("user", str((data.get("stt_output") or {}).get("text") or ""))
+            nghe = str((data.get("stt_output") or {}).get("text") or "")
+            self._chat_them("user", nghe)
+            self.hass.async_add_executor_job(self._luu_tieng, b"".join(self._ring), nghe)
         elif event.type is PipelineEventType.INTENT_END:
             ra = data.get("intent_output") or {}
             self._tiep = bool(ra.get("continue_conversation"))

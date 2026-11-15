@@ -51,9 +51,8 @@ class LocalApi:
 
     # -- màn hình -----------------------------------------------------------
     async def screen_show(self, source: str, loop: bool = False, after: str = "off",
-                          owner: str = "automation", ttl: float | None = None,
-                          rotate: int | None = None, fit: str | None = None) -> dict[str, Any]:
-        return await self._run(self.camera.screen.show, source, loop, after, owner, ttl, **_view(rotate, fit))
+                          owner: str = "automation", ttl: float | None = None) -> dict[str, Any]:
+        return await self._run(self.camera.screen.show, source, loop, after, owner, ttl)
 
     async def screen_text(self, title: str, messages: list, font_size: int = 15, after: str = "hold",
                           owner: str = "automation", ttl: float | None = None) -> dict[str, Any]:

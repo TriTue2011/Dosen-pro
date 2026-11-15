@@ -122,7 +122,8 @@ class AVTalkSession:
     """AVTalk toward the camera: a control connection plus a media link."""
 
     def __init__(self, host: str, port: int, user: str, password: str,
-                 connect_timeout: float = 5.0, read_timeout: float = 10.0):
+                 connect_timeout: float = 5.0, read_timeout: float = 10.0, on_other=None):
+        self._on_other = on_other                       # (nguồn, opcode, payload) cho gói camera tự đẩy tới
         self._args = (host, port, connect_timeout, read_timeout)
         self._user, self._password = user, password
         self.control: DVRIPClient | None = None
@@ -162,11 +163,11 @@ class AVTalkSession:
             self._expect(control, OP_AVTALK_START_REPLY, "start")
             media.start_keepalive()
             self._drain_stop.clear()
-            for c, n in ((media, "avtalk-media-drain"),
-                         (control, "avtalk-control-drain")):
+            for c, n in ((media, "avtalk-media"), (control, "avtalk-control")):
+                cb = (lambda op, data, _n=n: self._on_other(_n, op, data)) if self._on_other else None
                 threading.Thread(target=c.drain_forever,
-                                 args=(self._drain_stop,), daemon=True,
-                                 name=n).start()
+                                 args=(self._drain_stop, cb), daemon=True,
+                                 name=n + "-drain").start()
         except Exception:
             control.close()
             media.close()

@@ -226,3 +226,17 @@ def test_mic_stop_does_not_leave_a_traceback_in_the_reader_thread(fake_cam, cfg)
     assert mic.last_error is None        # dừng chủ động, không phải lỗi cam
 
 
+
+
+def test_unsolicited_non_alarm_packets_become_opcode_events(cfg):
+    """Nút gọi có thể đến bằng đường khác 1504: mọi gói lạ (trừ keepalive) phải lộ ra thành sự kiện opcode_<số>."""
+    from dosen_core.events import AlarmSession, describe_chunk, other_record
+    got = []
+    s = AlarmSession(cfg, got.append)
+    s._handle_other(1007, b'{"Ret":100}\n\x00')                          # keepalive: im lặng
+    s._handle_other(1520, b'{"Name":"OPCall","OPCall":{"Action":"Ring"}}\n\x00')
+    assert [r["event"] for r in got] == ["opcode_1520"]
+    assert got[0]["alarm"]["Source"] == "alarm" and '"Action":"Ring"' in got[0]["alarm"]["Raw"]
+    assert got[0]["possible_button_press"] is False                       # không khẳng định đó là nút bấm
+    assert describe_chunk(b"\x00\x01\xfe\xff").startswith("hex:0001feff")
+    assert other_record("avtalk-control", 7, b"x")["alarm"] == {"Source": "avtalk-control", "Opcode": 7, "Raw": "x"}

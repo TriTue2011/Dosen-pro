@@ -11,14 +11,6 @@ screen_show:
     loop:
       default: false
       selector: {boolean: {}}
-    rotate:
-      selector:
-        select:
-          options: ["0", "90", "180", "270"]
-    fit:
-      selector:
-        select:
-          options: ["contain", "cover"]
     after:
       default: "off"
       selector:

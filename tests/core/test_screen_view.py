@@ -76,22 +76,24 @@ def test_bad_rotate_or_fit_is_refused(cfg):
     scr = Screen(cfg)
     try:
         with pytest.raises(ValueError):
-            scr.show("x.mp4", rotate=91)
-        with pytest.raises(ValueError):
             scr.set_default("live", "rtsp://x", fit="zoom")
-        assert scr.status()["layers"] == [] and scr.status()["view"] == {"rotate": 0, "fit": "contain"}
+        with pytest.raises(ValueError):
+            scr.set_view(rotate=91)
+        assert scr.status()["view"] == {"rotate": 0, "fit": "contain"}
     finally:
         scr.close()
 
 
-def test_layer_view_falls_back_to_the_screen_default_and_text_is_never_rotated(cfg):
+def test_rotation_applies_only_to_the_default_screen_not_to_event_layers(cfg):
     scr = Screen(cfg)
     try:
         scr.view.update(rotate=90, fit="cover")
-        assert scr._view_of({"mode": "live", "rotate": None, "fit": None}) == (90, "cover")
-        assert scr._view_of({"mode": "video", "rotate": 0, "fit": "contain"}) == (0, "contain")   # lớp tự nêu thì theo lớp
-        assert scr._view_of({"mode": "text", "rotate": None, "fit": None}) == (0, "contain")
-        assert scr._view_of({"mode": "clock", "rotate": 90, "fit": "cover"}) == (0, "contain")
+        assert scr._view_of({"owner": "default", "mode": "live"}) == (90, "cover")
+        assert scr._view_of({"owner": "default", "mode": "image"}) == (90, "cover")
+        assert scr._view_of({"owner": "default", "mode": "clock"}) == (0, "contain")
+        assert scr._view_of({"owner": "zalo_call", "mode": "video"}) == (0, "contain")       # sự kiện: nguyên trạng
+        assert scr._view_of({"owner": "chuong", "mode": "live"}) == (0, "contain")
+        assert scr._view_of({"owner": "assist", "mode": "text"}) == (0, "contain")
     finally:
         scr.close()
 

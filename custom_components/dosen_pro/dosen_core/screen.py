@@ -77,8 +77,9 @@ def build_hevc_cmd(source: str, width: int, height: int, fps: int,
 
 
 class Screen:
-    def __init__(self, cfg, now=None):
+    def __init__(self, cfg, now=None, on_other=None):
         self.cfg = cfg
+        self._on_other = on_other
         self._now = now or (lambda: datetime.now().astimezone())   # giờ địa phương (trong HA: múi giờ của HA)
         self._lock = threading.RLock()
         self._session: avtalk.AVTalkSession | None = None
@@ -133,7 +134,7 @@ class Screen:
         session = avtalk.AVTalkSession(
             self.cfg.cam_ip, self.cfg.cam_port, self.cfg.cam_user,
             self.cfg.cam_pass, self.cfg.dvrip_connect_timeout,
-            self.cfg.dvrip_read_timeout)
+            self.cfg.dvrip_read_timeout, self._on_other)
         session.open(self.width, self.height, self.fps)
         if self.cfg.screen_auto_wake and session.control is not None:
             # The LCD ignores video while it sleeps: switch it on, like the app's "Bật" button.
@@ -262,12 +263,11 @@ class Screen:
                 "after": "off"}
 
     def _view_of(self, layer: dict) -> tuple[int, str]:
-        """Xoay + kiểu khung của một lớp: lớp tự nêu thì theo lớp, không thì theo mặc định. Chữ và đồng hồ đã vẽ
-        sẵn đúng chiều màn nên không bao giờ xoay hay cắt."""
-        if layer["mode"] in ("text", "clock"):
+        """Xoay + kiểu khung: CHỈ áp cho màn hình mặc định (ảnh, video, live). Lớp sự kiện (cuộc gọi, chuông cửa,
+        Assist…) luôn hiện nguyên trạng; chữ và đồng hồ đã vẽ sẵn đúng chiều màn."""
+        if layer["owner"] != "default" or layer["mode"] in ("text", "clock"):
             return 0, "contain"
-        rotate, fit = layer.get("rotate"), layer.get("fit")
-        return (self.view["rotate"] if rotate is None else rotate), (self.view["fit"] if fit is None else fit)
+        return self.view["rotate"], self.view["fit"]
 
     def _apply(self) -> None:
         """Make the encoder show the top layer (or the default); close the session if nothing is left."""
@@ -306,12 +306,8 @@ class Screen:
                      redact_source(layer["source"]), layer["owner"], len(self._layers))
 
     def show(self, source: str, loop: bool = False, after: str = "off", owner: str = "api",
-             ttl: float | None = None, mode: str | None = None, rotate: int | None = None,
-             fit: str | None = None) -> dict:
+             ttl: float | None = None, mode: str | None = None) -> dict:
         """Push an event layer showing ``source`` (file, URL, rtsp://, image, lavfi:...).
-
-        ``rotate`` (0/90/180/270, clockwise) and ``fit`` ("contain" = letterbox, "cover" = fill and crop)
-        override the screen's defaults for this layer only; None = use the default.
 
         The newest layer is displayed. A layer ends when its source ends (``after="off"``), when
         ``ttl`` seconds pass, or on ``release(owner)``; then the layer below, or the default screen,
@@ -323,11 +319,9 @@ class Screen:
             raise ValueError("ttl must be 1..86400 seconds")
         if not isinstance(owner, str) or not owner or len(owner) > 64:
             raise ValueError("owner must be a short non-empty string")
-        check_view(rotate, fit)
         with self._lock:
             self._layers = [l for l in self._layers if l["owner"] != owner]
             layer = {"owner": owner, "source": source, "loop": bool(loop), "after": after,
-                     "rotate": rotate, "fit": fit,
                      "mode": mode or self._kind(source),
                      "deadline": time.monotonic() + ttl if ttl else None}
             self._layers.append(layer)
