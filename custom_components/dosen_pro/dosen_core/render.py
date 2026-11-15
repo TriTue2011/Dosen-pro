@@ -323,14 +323,17 @@ def render_card(title: str = "", value: str = "", caption: str = "", rows: list 
         y += 6
     rows = list(rows or [])[:CARD_MAX_ROWS_WITH_VALUE if value else CARD_MAX_ROWS]
     if rows:
-        d.line([8, y, WIDTH - 8, y], fill=RULE, width=1)
+        if value or not title:                                # đã có đường kẻ dưới tiêu đề thì không kẻ đôi
+            d.line([8, y, WIDTH - 8, y], fill=RULE, width=1)
         y += 4
-        step = min(34, (HEIGHT - 8 - y) // len(rows))
+        roomy = not value and len(rows) <= 5                  # ít dòng, không có số lớn: chữ to, dòng cao cho đỡ trống
+        vsize, lsize, step_max = (22, 20, 56) if roomy else (17, 15, 34)
+        step = min(step_max, (HEIGHT - 8 - y) // len(rows))
         for r in rows:
-            vtext, vfont = _fit_font(d, str(r.get("value", "")), 108, 17, 11, True)
+            vtext, vfont = _fit_font(d, str(r.get("value", "")), 116 if roomy else 108, vsize, 11, True)
             vw = d.textlength(vtext, font=vfont)
-            ltext, lfont = _fit_font(d, str(r.get("label", "")), WIDTH - 24 - int(vw) - 8, 15, 11)
-            ty = y + (step - 20) // 2
+            ltext, lfont = _fit_font(d, str(r.get("label", "")), WIDTH - 24 - int(vw) - 8, lsize, 11)
+            ty = y + (step - int(vsize * 1.2)) // 2
             d.text((10, ty), ltext, font=lfont, fill=INK)
             d.text((WIDTH - 10 - vw, ty), vtext, font=vfont, fill=CARD_COLORS.get(r.get("color"), INK))
             y += step

@@ -16,7 +16,7 @@ from .entity import DosenEntity
 async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities) -> None:
     c = hass.data[DOMAIN][entry.entry_id]
     async_add_entities([DosenMicGain(c), DosenScreenTime(c), DosenScreenBrightness(c), DosenSpeakerVolume(c),
-                        DosenMicVolume(c)])
+                        DosenMicVolume(c), DosenCarouselSeconds(c)])
 
 
 class DosenMicGain(DosenEntity, RestoreNumber):
@@ -142,3 +142,27 @@ class DosenSpeakerVolume(_DosenAudioNumber):
 class DosenMicVolume(_DosenAudioNumber):
     _attr_name = "Âm lượng mic camera"
     _key = "mic"
+
+
+class DosenCarouselSeconds(CoordinatorEntity, NumberEntity):
+    """Thời gian mỗi màn của màn luân phiên (giây): đổi được ngay, nhớ qua khởi động lại. Trang có ``seconds`` riêng thì giữ riêng."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Thời gian mỗi màn luân phiên"
+    _attr_native_min_value = 3
+    _attr_native_max_value = 3600
+    _attr_native_step = 1
+    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
+    _attr_mode = NumberMode.BOX
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.entry.entry_id}-carousel-seconds"
+        self._attr_device_info = device_info(coordinator.entry.entry_id)
+
+    @property
+    def native_value(self) -> float:
+        return self.coordinator.carousel.seconds
+
+    async def async_set_native_value(self, value: float) -> None:
+        self.coordinator.carousel.set_seconds(value)

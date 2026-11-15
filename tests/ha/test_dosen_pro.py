@@ -718,3 +718,45 @@ async def test_carousel_pages_and_switch_survive_a_restart(hass, hass_storage):
     assert [p["type"] for p in c.carousel.pages] == ["clock", "text"] and c.carousel.seconds == 12.0
     assert c.carousel.running and hass.states.get("switch.dosen_pro_luan_phien_man_hinh").state == "on"
     await c.carousel.async_stop()
+
+
+async def test_carousel_seconds_default_20_is_a_number_you_can_change_and_it_is_saved(hass):
+    await _setup(hass)
+    ent = "number.dosen_pro_thoi_gian_moi_man_luan_phien"
+    assert hass.states.get(ent).state == "20.0"                                    # mặc định 20 giây
+    car = hass.data[DOMAIN][next(iter(hass.data[DOMAIN]))].carousel
+    await hass.services.async_call("number", "set_value", {"entity_id": ent, "value": 45}, blocking=True)
+    assert car.seconds == 45.0 and hass.states.get(ent).state == "45.0"
+    for bad in (1, 4000):
+        with pytest.raises(Exception):                                             # ngoài 3–3600 bị từ chối
+            await hass.services.async_call("number", "set_value", {"entity_id": ent, "value": bad}, blocking=True)
+    assert car.seconds == 45.0
+    await hass.services.async_call(DOMAIN, "screen_carousel", {"pages": [{"type": "clock"}, {"type": "text", "title": "A"}],
+                                                              "enabled": False}, blocking=True)
+    assert [p.get("seconds") for p in car.pages] == [None, None]                    # trang không có seconds riêng → dùng ô số này
+
+
+async def test_card_translates_on_off_sensors_to_vietnamese_with_colour_and_custom_names(hass):
+    await _setup(hass)
+    s = hass.states.async_set
+    s("binary_sensor.ngu", "on", {"device_class": "occupancy", "friendly_name": "Hiện diện phòng ngủ Có người"})
+    s("binary_sensor.hoc", "off", {"device_class": "occupancy", "friendly_name": "Hiện diện phòng học"})
+    s("binary_sensor.cua", "on", {"device_class": "door", "friendly_name": "Cửa chính"})
+    s("binary_sensor.khoi", "on", {"device_class": "smoke", "friendly_name": "Báo khói"})
+    s("binary_sensor.la", "off", {"friendly_name": "Cảm biến lạ"})
+    s("switch.den", "on", {"friendly_name": "Đèn bếp"})
+    s("person.tri", "home", {"friendly_name": "Trí"})
+    s("sensor.chu", "Đang chạy", {"friendly_name": "Máy giặt"})
+    await hass.services.async_call(DOMAIN, "screen_card", {"title": "Hiện diện", "entities": [
+        {"entity": "binary_sensor.ngu", "name": "Phòng ngủ"}, {"entity": "binary_sensor.hoc", "name": "Phòng học"},
+        "binary_sensor.cua", "binary_sensor.khoi", "binary_sensor.la", "switch.den", "person.tri", "sensor.chu"]}, blocking=True)
+    rows = _calls("card")[-1]["rows"]
+    assert rows == [
+        {"label": "Phòng ngủ", "value": "Có người", "color": "green"},          # tên tự đặt thay cho «Hiện diện phòng ngủ Có người»
+        {"label": "Phòng học", "value": "Trống"},
+        {"label": "Cửa chính", "value": "Mở", "color": "orange"},
+        {"label": "Báo khói", "value": "CÓ KHÓI", "color": "red"},
+        {"label": "Cảm biến lạ", "value": "Tắt"},                                # không rõ loại: Bật/Tắt
+        {"label": "Đèn bếp", "value": "Bật", "color": "green"},
+        {"label": "Trí", "value": "Ở nhà", "color": "green"},
+        {"label": "Máy giặt", "value": "Đang chạy"}]                              # chữ khác giữ nguyên

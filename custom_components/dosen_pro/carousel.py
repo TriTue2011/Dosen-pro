@@ -25,7 +25,7 @@ from .resolve import resolve_source
 
 _LOGGER = logging.getLogger(__name__)
 PAGE_TYPES = ("clock", "card", "image", "video", "camera", "text")
-DEFAULT_SECONDS = 10.0
+DEFAULT_SECONDS = 20.0
 MIN_SECONDS, MAX_SECONDS = 3.0, 3600.0
 _CHECK_EVERY = 5.0          # đồng hồ sang phút mới / số liệu thẻ đổi thì vẽ lại, kiểm mỗi ngần này giây (không vẽ lại khi giống hệt)
 _MAX_PAGES = 12
@@ -40,7 +40,8 @@ PAGE_SCHEMA = vol.Schema({
     # thẻ thông tin
     vol.Optional("title"): cv.string, vol.Optional("value"): cv.string, vol.Optional("caption"): cv.string,
     vol.Optional("color"): vol.In(list(CARD_COLORS)), vol.Optional("main_entity"): cv.entity_id,
-    vol.Optional("entities"): vol.All(cv.ensure_list, [cv.entity_id]),
+    vol.Optional("entities"): vol.All(cv.ensure_list, [vol.Any(cv.entity_id, vol.Schema(
+        {vol.Required("entity"): cv.entity_id, vol.Optional("name"): cv.string}))]),
     vol.Optional("rows"): vol.All(cv.ensure_list, [vol.Any(_CARD_ROW, cv.string)]),
     # chữ
     vol.Optional("messages"): vol.All(cv.ensure_list, [vol.Any(_MESSAGE, cv.string)]),
@@ -110,8 +111,16 @@ class Carousel:
         if pages is not None:
             self.pages = validate_pages(pages)
         if seconds is not None:
-            self.seconds = float(seconds)
+            self.set_seconds(seconds)
         self._save()
+
+    def set_seconds(self, seconds: float) -> None:
+        """Thời lượng mặc định mỗi trang (trang có ``seconds`` riêng thì giữ riêng). Áp dụng từ trang kế tiếp, không cần khởi động lại vòng."""
+        if not MIN_SECONDS <= float(seconds) <= MAX_SECONDS:
+            raise ValueError(f"seconds must be {MIN_SECONDS:g}..{MAX_SECONDS:g}")
+        self.seconds = float(seconds)
+        self._save()
+        self._c.async_update_listeners()
 
     async def async_start(self) -> None:
         if not self.pages:

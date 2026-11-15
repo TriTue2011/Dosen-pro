@@ -38,6 +38,7 @@ _MESSAGE = vol.Schema({
     vol.Optional("role", default="info"): vol.In(["user", "assistant", "caller", "info"]),
     vol.Required("text"): cv.string,
 })
+_CARD_ENTITY = vol.Any(cv.entity_id, vol.Schema({vol.Required("entity"): cv.entity_id, vol.Optional("name"): cv.string}))
 _CARD_ROW = vol.Schema({
     vol.Required("label"): cv.string,
     vol.Required("value"): cv.string,
@@ -57,7 +58,7 @@ SERVICE_SCHEMAS = {
         vol.Optional("caption", default=""): cv.string,
         vol.Optional("color", default="red"): vol.In(list(CARD_COLORS)),
         vol.Optional("main_entity"): cv.entity_id,
-        vol.Optional("entities", default=[]): vol.All(cv.ensure_list, [cv.entity_id]),
+        vol.Optional("entities", default=[]): vol.All(cv.ensure_list, [_CARD_ENTITY]),
         vol.Optional("rows", default=[]): vol.All(cv.ensure_list, [vol.Any(_CARD_ROW, cv.string)]),
         vol.Optional("after", default="hold"): vol.In(["off", "hold"]),
         vol.Optional("owner", default="automation"): cv.string,

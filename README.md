@@ -134,7 +134,7 @@ Chỉ cần khai dữ liệu, không phải tự vẽ ảnh. Chọn trực tiế
 | `title` | Tiêu đề (tự thu nhỏ nếu dài). |
 | `main_entity` | Cảm biến chính: giá trị thành **số lớn**, tên thành nhãn dưới số. Hoặc tự điền `value` / `caption`. |
 | `color` | Màu số lớn: `red` (mặc định), `green`, `blue`, `orange`, `black`. |
-| `entities` | Danh sách thực thể, mỗi cái một dòng (tên + giá trị kèm đơn vị). |
+| `entities` | Danh sách thực thể, mỗi cái một dòng (tên + giá trị kèm đơn vị). Mỗi mục là `entity_id` hoặc `{entity: ..., name: "Phòng ngủ"}` để tự đặt tên hiển thị. Cảm biến bật/tắt được dịch ra chữ Việt và tô màu: hiện diện «Có người» (xanh lá) / «Trống», cửa «Mở» (cam) / «Đóng», khoá, khói, pin yếu… |
 | `rows` | Dòng tự khai: `"Hôm nay: 18,6 kWh"` hoặc `{label, value, color}` (màu từng dòng). Đứng trước các dòng của `entities`. |
 | `owner`, `ttl`, `after` | Như `screen_text`: lớp theo `owner` thay nhau; hết `ttl` về màn mặc định. |
 
@@ -178,7 +178,7 @@ trạng thái bật được **lưu**, khởi động lại HA vẫn chạy ti�
 ```yaml
 - action: dosen_pro.screen_carousel
   data:
-    seconds: 10                       # thời lượng mặc định mỗi trang (3–3600 giây)
+    seconds: 20                       # thời lượng mặc định mỗi trang (3–3600 giây); đổi sau ở number.dosen_pro_thoi_gian_moi_man_luan_phien
     pages:
       - {type: clock, seconds: 20}    # đồng hồ đầy đủ (tự cập nhật khi sang phút mới)
       - type: card                    # thẻ thông tin: cùng trường với screen_card
@@ -200,7 +200,7 @@ Tắt: `dosen_pro.screen_carousel` với `enabled: false` (hoặc tắt công t�
 | `video` | `source` hoặc `media`, `loop` (mặc định lặp) |
 | `camera` | `camera_entity` hoặc `source` (rtsp://…) |
 
-Mỗi trang có thể có `seconds` riêng. Tối đa 12 trang. Cách hoạt động:
+Thời lượng mặc định mỗi màn là **20 giây**, chỉnh được ngay ở `number.dosen_pro_thoi_gian_moi_man_luan_phien` (áp dụng từ màn kế tiếp, được nhớ qua khởi động lại). Trang nào có `seconds` riêng thì giữ riêng. Tối đa 12 trang. Cách hoạt động:
 
 - Mỗi trang là một **lớp** của chủ `carousel`, nằm **dưới** mọi lớp sự kiện: cuộc gọi Zalo, chuông cửa, hội thoại Assist… vẫn đè lên;
   hết sự kiện thì trang đang tới lượt hiện lại.

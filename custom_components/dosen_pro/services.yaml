@@ -89,7 +89,7 @@ screen_carousel:
       example: '[{"type": "clock", "seconds": 15}, {"type": "card", "title": "Điện", "main_entity": "sensor.cong_suat", "seconds": 10}, {"type": "camera", "camera_entity": "camera.cua", "seconds": 8}]'
       selector: {object: {}}
     seconds:
-      default: 10
+      default: 20
       selector: {number: {min: 3, max: 3600, unit_of_measurement: "s", mode: box}}
     enabled:
       default: true
