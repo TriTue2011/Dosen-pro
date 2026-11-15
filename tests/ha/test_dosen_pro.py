@@ -518,7 +518,7 @@ async def test_default_screen_is_retried_until_its_camera_exists(hass, monkeypat
         async def apply_default(self):
             self.n += 1
             if self.n <= self.fail:
-                raise HomeAssistantError("Không tìm thấy camera camera.go2rtc_cua")
+                raise HomeAssistantError("Không tìm thấy camera camera.cua")
     c = Coord(3)
     await pkg._apply_default_safe(c)
     assert c.n == 4 and "Không áp dụng được" not in caplog.text                 # hỏng 3 lần rồi áp được
