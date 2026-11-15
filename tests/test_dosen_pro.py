@@ -4,6 +4,7 @@ import aiohttp
 import pytest
 from homeassistant.components.media_player import DOMAIN as MP_DOMAIN
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.dosen_pro.const import CONF_API_KEY, CONF_URL, DOMAIN
@@ -18,12 +19,20 @@ def _mock_api(aioclient_mock, status=200):
     aioclient_mock.get(URL + "/api/status", status=status, json={"service": "x"})
     aioclient_mock.get(URL + "/api/screen/status", json=SCREEN)
     aioclient_mock.get(URL + "/api/speaker/status", json=SPEAKER)
-    for p in ("screen/show", "screen/text", "screen/off", "screen/sleep", "screen/power", "speaker/play", "speaker/stop"):
+    for p in ("screen/show", "screen/text", "screen/off", "screen/sleep", "screen/power", "speaker/play",
+              "speaker/play_bytes", "speaker/stop"):
         aioclient_mock.post(URL + "/api/" + p, json={})
 
 
-async def _setup(hass, aioclient_mock):
+async def _setup(hass, aioclient_mock, monkeypatch=None):
     _mock_api(aioclient_mock)
+    if monkeypatch is not None:                 # không mở ffmpeg/pipeline thật trong test
+        from custom_components.dosen_pro import assist_satellite as sat_mod
+
+        async def _no_loop(self):
+            return
+        monkeypatch.setattr(sat_mod.DosenSatellite, "_chay", _no_loop)
+    assert await async_setup_component(hass, "homeassistant", {})       # Assist cần thành phần này
     entry = MockConfigEntry(domain=DOMAIN, data={CONF_URL: URL, CONF_API_KEY: "k1"}, unique_id=URL)
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
@@ -37,6 +46,7 @@ def _posts(aioclient_mock, path):
 
 async def test_config_flow_ok_and_errors(hass, aioclient_mock):
     _mock_api(aioclient_mock)
+    assert await async_setup_component(hass, "homeassistant", {})
     r = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
     assert r["type"] == FlowResultType.FORM
     r = await hass.config_entries.flow.async_configure(r["flow_id"], {CONF_URL: URL + "/", CONF_API_KEY: "k1"})
@@ -46,12 +56,14 @@ async def test_config_flow_ok_and_errors(hass, aioclient_mock):
 
 async def test_config_flow_wrong_key(hass, aioclient_mock):
     _mock_api(aioclient_mock, status=401)
+    assert await async_setup_component(hass, "homeassistant", {})
     r = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
     r = await hass.config_entries.flow.async_configure(r["flow_id"], {CONF_URL: URL, CONF_API_KEY: "sai"})
     assert r["type"] == FlowResultType.FORM and r["errors"] == {"base": "invalid_auth"}
 
 
 async def test_config_flow_cannot_connect(hass, aioclient_mock):
+    assert await async_setup_component(hass, "homeassistant", {})
     aioclient_mock.get("http://khong.co:8080/api/health", exc=aiohttp.ClientConnectionError("down"))
     r = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
     r = await hass.config_entries.flow.async_configure(r["flow_id"], {CONF_URL: "http://khong.co:8080"})
@@ -102,7 +114,7 @@ async def test_media_player_plays_a_url_and_reports_state(hass, aioclient_mock):
 
 async def test_screen_sensor(hass, aioclient_mock):
     await _setup(hass, aioclient_mock)
-    st = hass.states.get("sensor.dosen_pro_man_hinh")
+    st = hass.states.get("sensor.dosen_pro_noi_dung_man_hinh")
     assert st is not None and st.state == "off" and st.attributes["size"] == [240, 320]
 
 
@@ -111,3 +123,52 @@ async def test_unload_removes_services(hass, aioclient_mock):
     assert hass.services.has_service(DOMAIN, "screen_show")
     assert await hass.config_entries.async_unload(entry.entry_id)
     assert not hass.services.has_service(DOMAIN, "screen_show")
+
+
+async def test_entities_like_the_assist_camera_plus_screen(hass, aioclient_mock, monkeypatch):
+    await _setup(hass, aioclient_mock, monkeypatch)
+    ids = set(hass.states.async_entity_ids())
+    for e in ("media_player.dosen_pro_loa", "assist_satellite.dosen_pro", "number.dosen_pro_tang_mic",
+              "number.dosen_pro_thoi_gian_sang_man_hinh", "number.dosen_pro_do_sang_man_hinh",
+              "switch.dosen_pro_tat_mic", "switch.dosen_pro_nguon_man_hinh",
+              "switch.dosen_pro_hien_hoi_thoai_tren_man_hinh", "sensor.dosen_pro_noi_dung_man_hinh"):
+        assert e in ids, (e, sorted(ids))
+    assert any(i.startswith("select.dosen_pro") for i in ids)       # pipeline + độ nhạy nói xong
+    # Camera không báo nguồn màn hình: trạng thái giả định, HA hiện cả hai nút (không báo «tắt» sai).
+    assert hass.states.get("switch.dosen_pro_nguon_man_hinh").attributes["assumed_state"] is True
+
+
+async def test_screen_power_switch_and_numbers_write_to_the_camera(hass, aioclient_mock, monkeypatch):
+    await _setup(hass, aioclient_mock, monkeypatch)
+    await hass.services.async_call("switch", "turn_on", {"entity_id": "switch.dosen_pro_nguon_man_hinh"}, blocking=True)
+    assert _posts(aioclient_mock, "/api/screen/power")[-1][2] == {"on": True}
+    assert hass.states.get("switch.dosen_pro_nguon_man_hinh").state == "on"
+    await hass.services.async_call("number", "set_value", {"entity_id": "number.dosen_pro_thoi_gian_sang_man_hinh", "value": 0}, blocking=True)
+    assert _posts(aioclient_mock, "/api/screen/sleep")[-1][2] == {"seconds": 0}
+    await hass.services.async_call("number", "set_value", {"entity_id": "number.dosen_pro_do_sang_man_hinh", "value": 40}, blocking=True)
+    assert _posts(aioclient_mock, "/api/screen/sleep")[-1][2] == {"luminance": 40}
+
+
+async def test_assist_conversation_is_shown_on_the_camera_screen(hass, aioclient_mock, monkeypatch):
+    import asyncio
+
+    from homeassistant.components.assist_pipeline import PipelineEvent, PipelineEventType
+    from homeassistant.components.assist_satellite.const import DOMAIN as AS_DOMAIN
+    await _setup(hass, aioclient_mock, monkeypatch)
+    sat = hass.data[AS_DOMAIN].get_entity("assist_satellite.dosen_pro")
+    sat.on_pipeline_event(PipelineEvent(PipelineEventType.WAKE_WORD_END, {"wake_word_output": {}}))
+    sat.on_pipeline_event(PipelineEvent(PipelineEventType.STT_END, {"stt_output": {"text": "bật đèn phòng khách"}}))
+    sat.on_pipeline_event(PipelineEvent(PipelineEventType.INTENT_END, {"intent_output": {
+        "response": {"speech": {"plain": {"speech": "Đã bật đèn."}}}, "continue_conversation": False}}))
+    await asyncio.sleep(0.4)
+    await hass.async_block_till_done()
+    body = _posts(aioclient_mock, "/api/screen/text")[-1][2]
+    assert body["title"] == "Trợ lý" and body["after"] == "hold"
+    assert [(m["role"], m["text"]) for m in body["messages"]] == [
+        ("user", "bật đèn phòng khách"), ("assistant", "Đã bật đèn.")]       # «Đang nghe…» đã bị thay
+    # Tắt công tắc «Hiện hội thoại» thì không vẽ gì nữa.
+    await hass.services.async_call("switch", "turn_off", {"entity_id": "switch.dosen_pro_hien_hoi_thoai_tren_man_hinh"}, blocking=True)
+    n = len(_posts(aioclient_mock, "/api/screen/text"))
+    sat.on_pipeline_event(PipelineEvent(PipelineEventType.STT_END, {"stt_output": {"text": "xin chào"}}))
+    await asyncio.sleep(0.4)
+    assert len(_posts(aioclient_mock, "/api/screen/text")) == n

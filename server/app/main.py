@@ -457,11 +457,11 @@ async def screen_sleep_get() -> Response:
 
 @app.post("/api/screen/sleep")
 async def screen_sleep_set(request: Request) -> Response:
-    """Set how long the camera LCD stays lit: {"seconds": 0..3600}; 0 = never sleeps.
-    The screen shows our video only while it is awake."""
+    """Set how long the camera LCD stays lit and/or its brightness:
+    {"seconds": 0..3600 (0 = never sleeps), "luminance": 1..100}; give either or both."""
     try:
         body = await _json_body(request)
-        status = await asyncio.to_thread(_screen.set_sleep, body.get("seconds"))
+        status = await asyncio.to_thread(_screen.set_sleep, body.get("seconds"), body.get("luminance"))
     except ValueError as exc:
         return _err(400, "bad_params", str(exc))
     except (OSError, DVRIPError) as exc:
@@ -480,6 +480,21 @@ async def speaker_play(request: Request) -> Response:
             return _err(400, "bad_source", "field 'source' is required")
         status = await asyncio.to_thread(
             _speaker.play, source, float(body.get("volume", 1.0)))
+    except (ValueError, TypeError) as exc:
+        return _err(400, "bad_params", str(exc))
+    except (OSError, DVRIPError) as exc:
+        return _err(503, "camera_unreachable", f"speaker play failed: {exc}")
+    except RuntimeError as exc:
+        return _err(500, "ffmpeg_failed", str(exc))
+    return JSONResponse(status)
+
+
+@app.post("/api/speaker/play_bytes")
+async def speaker_play_bytes(request: Request, volume: float = 1.0) -> Response:
+    """Play audio sent in the request body (any container ffmpeg reads, e.g. a TTS WAV):
+    POST the bytes, ``?volume=1.0``. Used when the audio only exists inside HA (Assist replies)."""
+    try:
+        status = await asyncio.to_thread(_speaker.play_bytes, await request.body(), volume)
     except (ValueError, TypeError) as exc:
         return _err(400, "bad_params", str(exc))
     except (OSError, DVRIPError) as exc:

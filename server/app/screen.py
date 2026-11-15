@@ -147,17 +147,28 @@ class Screen:
         return {"work_mode": cfg.get("WorkMode"), "work_time": cfg.get("WorkTime"),
                 "luminance": cfg.get("WorkLuminance")}
 
-    def set_sleep(self, seconds: int) -> dict:
-        """Set the LCD timeout (0 = never sleeps). Same JSON the iCSee app sends:
-        {"WorkMode": "Timing", "WorkTime": seconds}."""
-        if not isinstance(seconds, int) or isinstance(seconds, bool) or not 0 <= seconds <= 3600:
+    def set_sleep(self, seconds: int | None = None, luminance: int | None = None) -> dict:
+        """Set the LCD timeout (``seconds``, 0 = never sleeps) and/or brightness (``luminance``
+        1..100). Like the app, send all three fields of Dev.ScreenWorkMode back together: the
+        current values are read first so the field not being changed stays as it is."""
+        if seconds is None and luminance is None:
+            raise ValueError("give seconds and/or luminance")
+        if seconds is not None and (not isinstance(seconds, int) or isinstance(seconds, bool)
+                                    or not 0 <= seconds <= 3600):
             raise ValueError("seconds must be an integer 0..3600 (0 = never sleeps)")
+        if luminance is not None and (not isinstance(luminance, int) or isinstance(luminance, bool)
+                                      or not 1 <= luminance <= 100):
+            raise ValueError("luminance must be an integer 1..100")
         client = self._control()
         try:
-            client.set_config(self._SLEEP_KEY, {"WorkMode": "Timing", "WorkTime": seconds})
+            cur = client.get_config(self._SLEEP_KEY).get(self._SLEEP_KEY) or {}
+            new = {"WorkMode": cur.get("WorkMode") or "Timing",
+                   "WorkTime": cur.get("WorkTime", 0) if seconds is None else seconds,
+                   "WorkLuminance": cur.get("WorkLuminance", 100) if luminance is None else luminance}
+            client.set_config(self._SLEEP_KEY, new)
         finally:
             client.close()
-        log.info("man hinh: dat thoi gian sang %ss", seconds)
+        log.info("man hinh: dat thoi gian sang=%s do sang=%s", seconds, luminance)
         return self.get_sleep()
 
     def power(self, on: bool) -> dict:

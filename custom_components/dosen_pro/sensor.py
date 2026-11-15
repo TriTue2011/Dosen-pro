@@ -15,7 +15,7 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities) -> N
 
 class DosenScreenMode(CoordinatorEntity, SensorEntity):
     _attr_has_entity_name = True
-    _attr_name = "Màn hình"
+    _attr_name = "Nội dung màn hình"
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = ["off", "video", "image", "text"]
 

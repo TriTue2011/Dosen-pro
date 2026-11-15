@@ -21,10 +21,23 @@ class DosenApi:
         self.url = url.rstrip("/")
         self._headers = {"X-API-Key": api_key} if api_key else {}
 
-    async def _call(self, method: str, path: str, body: dict | None = None) -> dict[str, Any]:
+    @property
+    def mic_url(self) -> str:
+        """Luồng mic của camera (WAV 8 kHz mono, không kết thúc) cho ffmpeg của HA."""
+        return self.url + "/api/audio/mic?format=wav"
+
+    @property
+    def mic_headers(self) -> str | None:
+        """Giá trị cho ``ffmpeg -headers`` (khoá API), hoặc None khi không có khoá."""
+        return f"X-API-Key: {self._headers['X-API-Key']}\r\n" if self._headers else None
+
+    async def _call(self, method: str, path: str, body: dict | None = None, *,
+                    data: bytes | None = None, params: dict | None = None) -> dict[str, Any]:
         try:
             async with self._session.request(
-                method, self.url + path, json=body, headers=self._headers,
+                method, self.url + path, json=body, data=data, params=params,
+                headers=({**self._headers, "Content-Type": "application/octet-stream"}
+                         if data is not None else self._headers),
                 timeout=aiohttp.ClientTimeout(total=30),
             ) as resp:
                 if resp.status == 401:
@@ -64,11 +77,17 @@ class DosenApi:
     async def screen_power(self, on: bool) -> dict[str, Any]:
         return await self._call("POST", "/api/screen/power", {"on": on})
 
-    async def screen_sleep(self, seconds: int) -> dict[str, Any]:
-        return await self._call("POST", "/api/screen/sleep", {"seconds": seconds})
+    async def screen_sleep(self, seconds: int | None = None,
+                           luminance: int | None = None) -> dict[str, Any]:
+        body = {k: v for k, v in (("seconds", seconds), ("luminance", luminance)) if v is not None}
+        return await self._call("POST", "/api/screen/sleep", body)
 
     async def speaker_play(self, source: str, volume: float = 1.0) -> dict[str, Any]:
         return await self._call("POST", "/api/speaker/play", {"source": source, "volume": volume})
+
+    async def speaker_play_bytes(self, audio: bytes, volume: float = 1.0) -> dict[str, Any]:
+        """Phát âm thanh chỉ có trong HA (câu trả lời TTS của Assist) ra loa camera."""
+        return await self._call("POST", "/api/speaker/play_bytes", data=audio, params={"volume": volume})
 
     async def speaker_stop(self) -> dict[str, Any]:
         return await self._call("POST", "/api/speaker/stop")

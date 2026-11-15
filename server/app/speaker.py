@@ -8,8 +8,10 @@ telephone quality (G.711, 8 kHz).
 """
 
 import logging
+import os
 import queue
 import subprocess
+import tempfile
 import threading
 import time
 
@@ -68,6 +70,24 @@ class Speaker:
             log.info("loa: phat %s volume=%s duong=%s", redact_source(source),
                      volume, self.route)
         return self.status()
+
+    def play_bytes(self, data: bytes, volume: float = 1.0) -> dict:
+        """Play audio sent as bytes (any container ffmpeg reads, e.g. a TTS WAV). Written to a temp
+        file because ffmpeg reads it at real-time speed; the previous temp file is removed."""
+        if not data:
+            raise ValueError("no audio data")
+        fd, path = tempfile.mkstemp(prefix="icsee-spk-", suffix=".audio")
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        old, self._tmp_file = getattr(self, "_tmp_file", None), path
+        try:
+            return self.play(path, volume)
+        finally:
+            if old:
+                try:
+                    os.remove(old)
+                except OSError:
+                    pass
 
     def _pump(self, proc: subprocess.Popen, token: int, sink=None) -> None:
         try:

@@ -110,9 +110,16 @@ def test_screen_sleep_get_and_set(fake_cam_avtalk):
     assert first == {"work_mode": "Timing", "work_time": 30, "luminance": 60}
     out = scr.set_sleep(0)                                   # 0 = không bao giờ tắt (như app: «Never»)
     assert out["work_time"] == 0 and out["work_mode"] == "Timing" and out["luminance"] == 60
-    for bad in (-1, 3601, "5", None, True):
+    out = scr.set_sleep(luminance=80)                        # chỉ đổi độ sáng: thời gian giữ nguyên
+    assert out == {"work_mode": "Timing", "work_time": 0, "luminance": 80}
+    for bad in (-1, 3601, "5", True):
         with pytest.raises(ValueError):
             scr.set_sleep(bad)
+    for bad in (0, 101, "9"):
+        with pytest.raises(ValueError):
+            scr.set_sleep(luminance=bad)
+    with pytest.raises(ValueError):
+        scr.set_sleep()
 
 
 def test_screen_open_wakes_the_lcd_and_power_api_works(fake_cam_avtalk):
@@ -131,3 +138,25 @@ def test_screen_open_wakes_the_lcd_and_power_api_works(fake_cam_avtalk):
             scr.power("on")
     finally:
         scr.off()
+
+
+def test_speaker_plays_uploaded_wav_bytes(fake_cam_avtalk):
+    import io
+    import math
+    import struct
+    import wave
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(8000)
+        w.writeframes(b"".join(struct.pack("<h", int(8000 * math.sin(i / 6))) for i in range(8000)))   # 1 s
+    talk = TalkSession()
+    spk = Speaker(talk)
+    try:
+        spk.play_bytes(buf.getvalue())
+        assert _wait(lambda: spk.status()["bytes_sent"] > 4000)
+        assert _wait(lambda: spk.status()["playing"] is False, 25)
+        assert spk.status()["last_error"] is None
+        with pytest.raises(ValueError):
+            spk.play_bytes(b"")
+    finally:
+        spk.stop()

@@ -8,7 +8,7 @@ from datetime import timedelta
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -18,7 +18,8 @@ from .api import DosenApi, DosenApiError
 from .const import CONF_API_KEY, CONF_URL, DOMAIN, SCAN_INTERVAL_SECONDS
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = [Platform.MEDIA_PLAYER, Platform.SENSOR]
+PLATFORMS = [Platform.ASSIST_SATELLITE, Platform.MEDIA_PLAYER, Platform.NUMBER, Platform.SELECT,
+             Platform.SENSOR, Platform.SWITCH]
 
 _MESSAGE = vol.Schema({
     vol.Optional("role", default="info"): vol.In(["user", "assistant", "caller", "info"]),
@@ -43,10 +44,11 @@ SERVICE_SCHEMAS = {
         vol.Optional("entry_id"): cv.string,
         vol.Required("on"): cv.boolean,
     }),
-    "screen_sleep": vol.Schema({
+    "screen_sleep": vol.All(vol.Schema({
         vol.Optional("entry_id"): cv.string,
-        vol.Required("seconds"): vol.All(vol.Coerce(int), vol.Range(min=0, max=3600)),
-    }),
+        vol.Optional("seconds"): vol.All(vol.Coerce(int), vol.Range(min=0, max=3600)),
+        vol.Optional("luminance"): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
+    }), cv.has_at_least_one_key("seconds", "luminance")),
     "speaker_play": vol.Schema({
         vol.Optional("entry_id"): cv.string,
         vol.Required("source"): cv.string,
@@ -62,6 +64,36 @@ class DosenCoordinator(DataUpdateCoordinator):
                          update_interval=timedelta(seconds=SCAN_INTERVAL_SECONDS))
         self.api = api
         self.entry = entry
+        # Trạng thái chạy của vệ tinh Assist (đặt bởi các thực thể công tắc/số).
+        self.mic_muted = False
+        self.mic_gain_db = 0.0
+        self.show_chat = True
+        self._on_mute: list = []
+        self._on_gain: list = []
+
+    @callback
+    def set_mic_muted(self, muted: bool) -> None:
+        self.mic_muted = muted
+        for fn in list(self._on_mute):
+            fn(muted)
+
+    @callback
+    def listen_mute(self, fn):
+        self._on_mute.append(fn)
+        return lambda: self._on_mute.remove(fn)
+
+    @callback
+    def set_mic_gain(self, db: float) -> None:
+        if db == self.mic_gain_db:
+            return
+        self.mic_gain_db = db
+        for fn in list(self._on_gain):
+            fn(db)
+
+    @callback
+    def listen_gain(self, fn):
+        self._on_gain.append(fn)
+        return lambda: self._on_gain.remove(fn)
 
     async def _async_update_data(self) -> dict:
         try:
@@ -95,7 +127,7 @@ async def _handle(hass: HomeAssistant, call: ServiceCall) -> None:
         elif call.service == "screen_power":
             await api.screen_power(d["on"])
         elif call.service == "screen_sleep":
-            await api.screen_sleep(d["seconds"])
+            await api.screen_sleep(d.get("seconds"), d.get("luminance"))
         elif call.service == "speaker_play":
             await api.speaker_play(d["source"], d["volume"])
         elif call.service == "speaker_stop":
