@@ -18,6 +18,27 @@ blueprint:
       default: ""
       selector:
         text: {}
+    xoay:
+      name: Xoay hình (hình video cuộc gọi)
+      description: "Xoay theo chiều kim đồng hồ để hình ngang vừa màn dọc. Không áp cho dòng chữ."
+      default: mac_dinh
+      selector:
+        select:
+          options:
+            - {value: mac_dinh, label: "Theo mặc định của màn hình"}
+            - {value: "0", label: "Không xoay"}
+            - {value: "90", label: "Xoay 90°"}
+            - {value: "180", label: "Xoay 180°"}
+            - {value: "270", label: "Xoay 270°"}
+    khung:
+      name: Kiểu khung hình
+      default: mac_dinh
+      selector:
+        select:
+          options:
+            - {value: mac_dinh, label: "Theo mặc định của màn hình"}
+            - {value: contain, label: "Vừa khung (có viền đen)"}
+            - {value: cover, label: "Lấp đầy màn (cắt rìa)"}
     hien_khi:
       name: Hiện khi cuộc gọi ở trạng thái
       default: [incoming, ringing, answered]
@@ -36,6 +57,8 @@ trigger:
 variables:
   hien_khi: !input hien_khi
   video_url: !input video_url
+  xoay: !input xoay
+  khung: !input khung
   state: "{{ trigger.event.data.state | default('') }}"
   peer: "{{ trigger.event.data.peer | default('?') }}"
   ket_thuc: [ended, missed, rejected, declined, no_answer, error]
@@ -48,10 +71,11 @@ action:
       - conditions: "{{ state == 'answered' and state in hien_khi and video_url != '' }}"
         sequence:
           - action: dosen_pro.screen_show
-            data:
-              source: "{{ video_url }}"
-              owner: zalo_call
-              after: hold
+            data: >-
+              {% set d = {'source': video_url, 'owner': 'zalo_call', 'after': 'hold'} %}
+              {% if xoay != 'mac_dinh' %}{% set d = dict(d, rotate=xoay | int) %}{% endif %}
+              {% if khung != 'mac_dinh' %}{% set d = dict(d, fit=khung) %}{% endif %}
+              {{ d }}
       - conditions: "{{ state in hien_khi }}"
         sequence:
           - action: dosen_pro.screen_text

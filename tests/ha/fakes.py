@@ -18,8 +18,10 @@ class FakeScreen:
     def close(self):
         self.calls.append(("close",))
 
-    def show(self, source, loop, after, owner, ttl):
-        self.calls.append(("show", {"source": source, "loop": loop, "after": after, "owner": owner, "ttl": ttl}))
+    def show(self, source, loop, after, owner, ttl, rotate=None, fit=None):
+        self.calls.append(("show", {"source": source, "loop": loop, "after": after, "owner": owner, "ttl": ttl,
+                                    **({"rotate": rotate} if rotate is not None else {}),
+                                    **({"fit": fit} if fit is not None else {})}))
         return self._status
 
     def show_text(self, title, messages, font_size, after, owner, ttl):
@@ -31,8 +33,14 @@ class FakeScreen:
         self.calls.append(("release", owner))
         return self._status
 
-    def set_default(self, mode, source):
-        self.calls.append(("default", {"mode": mode, "source": source}))
+    def set_default(self, mode, source, rotate=None, fit=None):
+        self.calls.append(("default", {"mode": mode, "source": source,
+                                       **({"rotate": rotate} if rotate is not None else {}),
+                                       **({"fit": fit} if fit is not None else {})}))
+        return self._status
+
+    def set_view(self, rotate=None, fit=None):
+        self.calls.append(("view", {"rotate": rotate, "fit": fit}))
         return self._status
 
     def off(self):

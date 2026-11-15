@@ -21,6 +21,7 @@ from .const import (CONF_ALARM_EVENTS, CONF_URL, DEFAULT_MODES, DEFAULT_PORT, DO
                     OPT_HA_URL, SCAN_INTERVAL_SECONDS)
 from .dosen_core.camera import Camera
 from .dosen_core.config import CamConfig
+from .dosen_core.screen import FITS, ROTATIONS
 from .resolve import resolve_camera, resolve_image, resolve_media, resolve_source
 
 _LOGGER = logging.getLogger(__name__)
@@ -38,6 +39,8 @@ SERVICE_SCHEMAS = {
         vol.Optional("camera_entity"): cv.entity_id,
         vol.Optional("media"): vol.Any(cv.string, dict),
         vol.Optional("loop", default=False): cv.boolean,
+        vol.Optional("rotate"): vol.All(vol.Coerce(int), vol.In(ROTATIONS)),
+        vol.Optional("fit"): vol.In(FITS),
         vol.Optional("after", default="off"): vol.In(["off", "hold"]),
         vol.Optional("owner", default="automation"): cv.string,
         vol.Optional("ttl"): vol.All(vol.Coerce(float), vol.Range(min=1, max=86400)),
@@ -49,6 +52,8 @@ SERVICE_SCHEMAS = {
     "screen_default": vol.Schema({
         vol.Optional("entry_id"): cv.string,
         vol.Required("mode"): vol.In(DEFAULT_MODES),
+        vol.Optional("rotate"): vol.All(vol.Coerce(int), vol.In(ROTATIONS)),
+        vol.Optional("fit"): vol.In(FITS),
         vol.Optional("source", default=""): cv.string,
         vol.Optional("camera_entity"): cv.entity_id,
         vol.Optional("media"): vol.Any(cv.string, dict),
@@ -98,6 +103,8 @@ class DosenCoordinator(DataUpdateCoordinator):
         self.default_camera = ""
         self.default_image = ""
         self.default_text = ""
+        self.default_rotate = 0                  # xoay hình (độ, theo chiều kim đồng hồ) cho mọi lớp không tự nêu
+        self.default_fit = "contain"             # contain = vừa khung có viền; cover = lấp đầy màn, cắt rìa
         self.mic_level_db: float | None = None   # mức tiếng mic gần nhất (dBFS), None = chưa có luồng
         self._on_level: list = []
         self._on_alarm: list = []
@@ -226,7 +233,7 @@ async def _handle(hass: HomeAssistant, call: ServiceCall) -> None:
         if call.service == "screen_show":
             url = await resolve_source(coord.hass, source=d.get("source"), camera_entity=d.get("camera_entity"),
                                        media=d.get("media"), base=coord.ha_base)
-            await api.screen_show(url, d["loop"], d["after"], d["owner"], d.get("ttl"))
+            await api.screen_show(url, d["loop"], d["after"], d["owner"], d.get("ttl"), d.get("rotate"), d.get("fit"))
         elif call.service == "screen_text":
             await api.screen_text(d["title"], d["messages"], d["font_size"], d["after"], d["owner"],
                                   d.get("ttl"))
@@ -237,7 +244,12 @@ async def _handle(hass: HomeAssistant, call: ServiceCall) -> None:
             if d["mode"] in ("image", "video", "live"):
                 url = await resolve_source(coord.hass, source=d.get("source"), camera_entity=d.get("camera_entity"),
                                            media=d.get("media"), base=coord.ha_base)
-            await api.screen_default(d["mode"], url)
+            await api.screen_default(d["mode"], url, d.get("rotate"), d.get("fit"))
+            if d.get("rotate") is not None:            # giữ các ô «Xoay hình / Kiểu khung hình mặc định» khớp với màn thật
+                coord.default_rotate = d["rotate"]
+            if d.get("fit") is not None:
+                coord.default_fit = d["fit"]
+            coord.async_update_listeners()
         elif call.service == "screen_off":
             await api.screen_off()
         elif call.service == "screen_power":
@@ -305,6 +317,7 @@ async def _read_audio_safe(coord: DosenCoordinator) -> None:
 
 async def _apply_default_safe(coord: DosenCoordinator) -> None:
     try:
+        await coord.api.screen_view(coord.default_rotate, coord.default_fit)     # khôi phục xoay/khung đã chọn trước khi tắt HA
         await coord.apply_default()
     except (DosenApiError, HomeAssistantError, KeyError) as exc:
         _LOGGER.warning("Không áp dụng được màn hình mặc định: %s", exc)

@@ -10,14 +10,15 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DEFAULT_MODES, DOMAIN, NONE_OPTION, device_info
+from .api import DosenApiError
+from .const import DEFAULT_MODES, DOMAIN, FIT_OPTIONS, NONE_OPTION, ROTATE_OPTIONS, device_info
 from .entity import DosenEntity
 
 
 async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities) -> None:
     c = hass.data[DOMAIN][entry.entry_id]
     async_add_entities([DosenPipelineSelect(hass, c), DosenVadSelect(hass, c), DosenDefaultScreen(c),
-                        DosenDefaultCamera(c), DosenDefaultImage(c)])
+                        DosenDefaultCamera(c), DosenDefaultImage(c), DosenDefaultRotate(c), DosenDefaultFit(c)])
 
 
 class DosenPipelineSelect(DosenEntity, AssistPipelineSelect):
@@ -125,3 +126,63 @@ class DosenDefaultImage(_SourcePicker):
 
     def __init__(self, coordinator) -> None:
         super().__init__(coordinator, "default_image", "Ảnh mặc định")
+
+
+class _ViewSelect(_RestoreSelect):
+    """Xoay hình / kiểu khung hình áp cho mọi thứ trên màn (trừ chữ và đồng hồ, đã vẽ sẵn đúng chiều). Chọn xong áp ngay."""
+
+    _field = ""
+
+    def _to_value(self, option: str):
+        raise NotImplementedError
+
+    def _to_option(self, value) -> str:
+        raise NotImplementedError
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        cu = await self.async_get_last_state()
+        if cu is not None and cu.state in self.options:
+            setattr(self.coordinator, self._field, self._to_value(cu.state))
+
+    @property
+    def current_option(self) -> str:
+        return self._to_option(getattr(self.coordinator, self._field))
+
+    async def async_select_option(self, option: str) -> None:
+        before = getattr(self.coordinator, self._field)
+        setattr(self.coordinator, self._field, self._to_value(option))
+        try:
+            await self.coordinator.api.screen_view(self.coordinator.default_rotate, self.coordinator.default_fit)
+        except DosenApiError as exc:
+            setattr(self.coordinator, self._field, before)
+            raise HomeAssistantError(f"Dosen Pro: {exc}") from exc
+        self.async_write_ha_state()
+
+
+class DosenDefaultRotate(_ViewSelect):
+    _attr_options = ROTATE_OPTIONS
+    _field = "default_rotate"
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "default_rotate", "Xoay hình mặc định")
+
+    def _to_value(self, option: str) -> int:
+        return int(option.rstrip("°"))
+
+    def _to_option(self, value: int) -> str:
+        return f"{value}°"
+
+
+class DosenDefaultFit(_ViewSelect):
+    _attr_options = list(FIT_OPTIONS)
+    _field = "default_fit"
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "default_fit", "Kiểu khung hình mặc định")
+
+    def _to_value(self, option: str) -> str:
+        return FIT_OPTIONS[option]
+
+    def _to_option(self, value: str) -> str:
+        return next(label for label, v in FIT_OPTIONS.items() if v == value)

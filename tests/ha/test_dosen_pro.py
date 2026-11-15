@@ -3,6 +3,7 @@
 import asyncio
 
 import pytest
+import voluptuous as vol
 from fakes import FakeCamera
 from homeassistant.components.media_player import DOMAIN as MP_DOMAIN
 from homeassistant.config_entries import ConfigEntryState
@@ -363,3 +364,26 @@ async def test_camera_volume_entities_read_and_write_the_camera(hass):
     await hass.services.async_call("switch", "turn_off", {"entity_id": "switch.dosen_pro_chong_on_mic_camera"}, blocking=True)
     assert cam.audio_calls[-1] == {"speaker": None, "mic": None, "anr": False}
     assert hass.states.get("switch.dosen_pro_chong_on_mic_camera").state == "off"
+
+
+async def test_rotate_and_fit_reach_the_screen_through_services_and_selects(hass):
+    await _setup(hass)
+    cam = _cam()
+    await hass.services.async_call(DOMAIN, "screen_show", {"source": "http://x/a.mp4", "rotate": "90", "fit": "cover"},
+                                   blocking=True)
+    assert _calls("show")[-1]["rotate"] == 90 and _calls("show")[-1]["fit"] == "cover"
+    await hass.services.async_call(DOMAIN, "screen_show", {"source": "http://x/a.mp4"}, blocking=True)
+    assert "rotate" not in _calls("show")[-1] and "fit" not in _calls("show")[-1]          # không nêu = dùng mặc định
+    with pytest.raises(vol.Invalid):
+        await hass.services.async_call(DOMAIN, "screen_show", {"source": "x", "rotate": 45}, blocking=True)
+    await hass.services.async_call(DOMAIN, "screen_default", {"mode": "live", "source": "rtsp://c", "rotate": 270},
+                                   blocking=True)
+    assert _calls("default")[-1]["rotate"] == 270
+    assert hass.states.get("select.dosen_pro_xoay_hinh_mac_dinh").state == "270°"        # ô chọn khớp màn thật
+    await hass.services.async_call("select", "select_option", {"entity_id": "select.dosen_pro_xoay_hinh_mac_dinh",
+                                                               "option": "90°"}, blocking=True)
+    assert ("view", {"rotate": 90, "fit": "contain"}) in cam.screen.calls
+    await hass.services.async_call("select", "select_option", {"entity_id": "select.dosen_pro_kieu_khung_hinh_mac_dinh",
+                                                               "option": "Lấp đầy (cắt rìa)"}, blocking=True)
+    assert cam.screen.calls[-1] == ("view", {"rotate": 90, "fit": "cover"})
+    assert hass.states.get("select.dosen_pro_kieu_khung_hinh_mac_dinh").state == "Lấp đầy (cắt rìa)"

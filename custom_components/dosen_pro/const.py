@@ -20,6 +20,8 @@ DEFAULT_MODES = ["off", "clock", "image", "video", "live"]
 ASSIST_OWNER = "assist"
 # Tuỳ chọn của mục cấu hình (hộp «Cấu hình»): màn hình mặc định chọn theo danh sách của HA.
 OPT_HA_URL = "ha_url"              # địa chỉ HA mà dịch vụ Docker dùng để tải ảnh/video (nếu HA chưa có địa chỉ nội bộ)
+ROTATE_OPTIONS = ["0°", "90°", "180°", "270°"]          # xoay hình theo chiều kim đồng hồ
+FIT_OPTIONS = {"Vừa khung (có viền)": "contain", "Lấp đầy (cắt rìa)": "cover"}
 NONE_OPTION = "—"                  # «chưa chọn» trong các ô chọn camera/ảnh
 
 

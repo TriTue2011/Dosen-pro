@@ -25,15 +25,20 @@ def phan_loai(exc: Exception) -> DosenApiError:
     return DosenApiError(text)
 
 
+def _view(rotate: int | None, fit: str | None) -> dict[str, Any]:
+    """Chỉ truyền xuống lõi những gì người gọi nêu; không nêu = lõi dùng mặc định của màn hình."""
+    return {k: v for k, v in (("rotate", rotate), ("fit", fit)) if v is not None}
+
+
 class LocalApi:
     """Cùng bộ hàm async mà tích hợp vẫn gọi, nhưng gọi thẳng camera (không qua dịch vụ nào)."""
 
     def __init__(self, camera) -> None:
         self.camera = camera
 
-    async def _run(self, fn, *args: Any):
+    async def _run(self, fn, *args: Any, **kwargs: Any):
         try:
-            return await asyncio.to_thread(fn, *args)
+            return await asyncio.to_thread(fn, *args, **kwargs)
         except (OSError, DVRIPError, ValueError, RuntimeError) as exc:
             raise phan_loai(exc) from exc
 
@@ -46,8 +51,9 @@ class LocalApi:
 
     # -- màn hình -----------------------------------------------------------
     async def screen_show(self, source: str, loop: bool = False, after: str = "off",
-                          owner: str = "automation", ttl: float | None = None) -> dict[str, Any]:
-        return await self._run(self.camera.screen.show, source, loop, after, owner, ttl)
+                          owner: str = "automation", ttl: float | None = None,
+                          rotate: int | None = None, fit: str | None = None) -> dict[str, Any]:
+        return await self._run(self.camera.screen.show, source, loop, after, owner, ttl, **_view(rotate, fit))
 
     async def screen_text(self, title: str, messages: list, font_size: int = 15, after: str = "hold",
                           owner: str = "automation", ttl: float | None = None) -> dict[str, Any]:
@@ -56,8 +62,12 @@ class LocalApi:
     async def screen_release(self, owner: str) -> dict[str, Any]:
         return await self._run(self.camera.screen.release, owner)
 
-    async def screen_default(self, mode: str, source: str = "") -> dict[str, Any]:
-        return await self._run(self.camera.screen.set_default, mode, source)
+    async def screen_default(self, mode: str, source: str = "", rotate: int | None = None,
+                             fit: str | None = None) -> dict[str, Any]:
+        return await self._run(self.camera.screen.set_default, mode, source, **_view(rotate, fit))
+
+    async def screen_view(self, rotate: int | None = None, fit: str | None = None) -> dict[str, Any]:
+        return await self._run(self.camera.screen.set_view, rotate, fit)
 
     async def screen_off(self) -> dict[str, Any]:
         return await self._run(self.camera.screen.off)

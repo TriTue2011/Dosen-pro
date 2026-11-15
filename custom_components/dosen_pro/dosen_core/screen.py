@@ -27,9 +27,26 @@ _IMAGE_EXT = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
 _DEFAULT_MODES = ("off", "clock", "image", "video", "live")
 
 
+ROTATIONS = (0, 90, 180, 270)            # độ xoay hình theo chiều kim đồng hồ
+FITS = ("contain", "cover")              # contain = vừa khung (có viền đen); cover = lấp đầy màn (cắt rìa)
+_ROTATE_FILTER = {0: "", 90: "transpose=1,", 180: "hflip,vflip,", 270: "transpose=2,"}
+
+
+def check_view(rotate, fit) -> None:
+    """None = dùng mặc định của màn hình; còn lại phải là giá trị hợp lệ."""
+    if rotate is not None and (isinstance(rotate, bool) or rotate not in ROTATIONS):
+        raise ValueError("rotate must be one of 0, 90, 180, 270")
+    if fit is not None and fit not in FITS:
+        raise ValueError("fit must be 'contain' or 'cover'")
+
+
 def build_hevc_cmd(source: str, width: int, height: int, fps: int,
-                   loop: bool = False, ffmpeg: str = "ffmpeg") -> list[str]:
-    """ffmpeg command: any source -> letterboxed H.265 Annex-B on stdout."""
+                   loop: bool = False, ffmpeg: str = "ffmpeg", rotate: int = 0, fit: str = "contain") -> list[str]:
+    """ffmpeg command: any source -> rotated, fitted H.265 Annex-B on stdout.
+
+    Chất lượng cao nhất mà màn 240x320 cần: thu nhỏ bằng lanczos, x265 preset slow, crf 14 (khung giới hạn
+    3 Mbps để đường truyền tới camera không nghẽn), khung khoá mỗi 2 giây để đổi nguồn/mở lại hình nhanh."""
+    check_view(rotate, fit)
     cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin"]
     image = source.lower().split("?")[0].endswith(_IMAGE_EXT)
     if source.startswith("rtsp://"):
@@ -43,16 +60,18 @@ def build_hevc_cmd(source: str, width: int, height: int, fps: int,
     if source.startswith("lavfi:"):
         cmd += ["-f", "lavfi"]
         source = source[len("lavfi:"):]
-    gop = fps * 4
+    gop = fps * 2
+    if fit == "cover":
+        fit_vf = f"scale={width}:{height}:force_original_aspect_ratio=increase:flags=lanczos,crop={width}:{height}"
+    else:
+        fit_vf = (f"scale={width}:{height}:force_original_aspect_ratio=decrease:flags=lanczos,"
+                  f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2")
     cmd += ["-i", source, "-an",
-            "-vf", (f"scale={width}:{height}:force_original_aspect_ratio="
-                    f"decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,"
-                    f"fps={fps}"),
-            "-pix_fmt", "yuv420p", "-c:v", "libx265", "-preset", "ultrafast",
-            "-tune", "zerolatency", "-x265-params",
-            (f"keyint={gop}:min-keyint={gop}:scenecut=0:bframes=0:slices=1:"
+            "-vf", f"{_ROTATE_FILTER[rotate]}{fit_vf},fps={fps},format=yuv420p",
+            "-c:v", "libx265", "-preset", "slow", "-tune", "zerolatency", "-x265-params",
+            (f"crf=14:keyint={gop}:min-keyint={gop}:scenecut=0:bframes=0:slices=1:"
              "repeat-headers=1:aud=0:log-level=none:"
-             "vbv-maxrate=400:vbv-bufsize=400"),
+             "vbv-maxrate=3000:vbv-bufsize=3000"),
             "-f", "hevc", "-"]
     return cmd
 
@@ -76,6 +95,7 @@ class Screen:
         # Layers = events, the newest on top wins; when a layer ends the one below (or the default) shows.
         self._layers: list[dict] = []
         self.default: dict = {"mode": "off", "source": ""}     # off | clock | image | video | live
+        self.view: dict = {"rotate": 0, "fit": "contain"}      # xoay + kiểu khung mặc định cho mọi lớp không tự nêu
         self._cur_key: tuple | None = None
         self._cur_layer: dict | None = None
         self._retry_at = 0.0
@@ -241,6 +261,14 @@ class Screen:
         return {"owner": "default", "source": src, "mode": mode, "loop": mode == "video",
                 "after": "off"}
 
+    def _view_of(self, layer: dict) -> tuple[int, str]:
+        """Xoay + kiểu khung của một lớp: lớp tự nêu thì theo lớp, không thì theo mặc định. Chữ và đồng hồ đã vẽ
+        sẵn đúng chiều màn nên không bao giờ xoay hay cắt."""
+        if layer["mode"] in ("text", "clock"):
+            return 0, "contain"
+        rotate, fit = layer.get("rotate"), layer.get("fit")
+        return (self.view["rotate"] if rotate is None else rotate), (self.view["fit"] if fit is None else fit)
+
     def _apply(self) -> None:
         """Make the encoder show the top layer (or the default); close the session if nothing is left."""
         with self._lock:
@@ -251,7 +279,8 @@ class Screen:
                 self._cur_key, self._cur_layer = None, None
                 self.mode, self.source = "off", ""
                 return
-            key = (layer["owner"], layer["source"], layer["loop"], layer["mode"])
+            rotate, fit = self._view_of(layer)
+            key = (layer["owner"], layer["source"], layer["loop"], layer["mode"], rotate, fit)
             if self._sender is not None and not self._sender.running:
                 self._cur_key = None                  # the AVTalk session died: reopen below
             if key == self._cur_key and (self._proc is not None or layer.get("ended")):
@@ -260,7 +289,8 @@ class Screen:
             self._stop_encoder()
             assert self._sender is not None
             self._sender.reset()
-            cmd = build_hevc_cmd(layer["source"], self.width, self.height, self.fps, layer["loop"], self.cfg.ffmpeg)
+            cmd = build_hevc_cmd(layer["source"], self.width, self.height, self.fps, layer["loop"], self.cfg.ffmpeg,
+                                 rotate, fit)
             try:
                 proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             except OSError as exc:
@@ -276,8 +306,12 @@ class Screen:
                      redact_source(layer["source"]), layer["owner"], len(self._layers))
 
     def show(self, source: str, loop: bool = False, after: str = "off", owner: str = "api",
-             ttl: float | None = None, mode: str | None = None) -> dict:
+             ttl: float | None = None, mode: str | None = None, rotate: int | None = None,
+             fit: str | None = None) -> dict:
         """Push an event layer showing ``source`` (file, URL, rtsp://, image, lavfi:...).
+
+        ``rotate`` (0/90/180/270, clockwise) and ``fit`` ("contain" = letterbox, "cover" = fill and crop)
+        override the screen's defaults for this layer only; None = use the default.
 
         The newest layer is displayed. A layer ends when its source ends (``after="off"``), when
         ``ttl`` seconds pass, or on ``release(owner)``; then the layer below, or the default screen,
@@ -289,9 +323,11 @@ class Screen:
             raise ValueError("ttl must be 1..86400 seconds")
         if not isinstance(owner, str) or not owner or len(owner) > 64:
             raise ValueError("owner must be a short non-empty string")
+        check_view(rotate, fit)
         with self._lock:
             self._layers = [l for l in self._layers if l["owner"] != owner]
             layer = {"owner": owner, "source": source, "loop": bool(loop), "after": after,
+                     "rotate": rotate, "fit": fit,
                      "mode": mode or self._kind(source),
                      "deadline": time.monotonic() + ttl if ttl else None}
             self._layers.append(layer)
@@ -334,14 +370,32 @@ class Screen:
             self._apply()
         return self.status()
 
-    def set_default(self, mode: str, source: str = "") -> dict:
+    def set_default(self, mode: str, source: str = "", rotate: int | None = None, fit: str | None = None) -> dict:
+        """Default screen. ``rotate``/``fit`` set the screen-wide view (None = keep the current one)."""
         if mode not in _DEFAULT_MODES:
             raise ValueError("mode must be one of " + ", ".join(_DEFAULT_MODES))
         if mode in ("image", "video", "live") and not source:
             raise ValueError("source is required for image, video and live")
+        check_view(rotate, fit)
         with self._lock:
+            if rotate is not None:
+                self.view["rotate"] = rotate
+            if fit is not None:
+                self.view["fit"] = fit
             self.default = {"mode": mode, "source": source if mode in ("image", "video", "live") else ""}
             self._cur_key = None                      # force the encoder to restart on the new default
+            self._apply()
+        return self.status()
+
+    def set_view(self, rotate: int | None = None, fit: str | None = None) -> dict:
+        """Set the screen-wide rotation / fit (None = keep) and re-encode what is showing now."""
+        check_view(rotate, fit)
+        with self._lock:
+            if rotate is not None:
+                self.view["rotate"] = rotate
+            if fit is not None:
+                self.view["fit"] = fit
+            self._cur_key = None
             self._apply()
         return self.status()
 
@@ -446,6 +500,7 @@ class Screen:
                 "open": bool(s and s.running),
                 "source": redact_source(self.source) if self.mode not in ("text", "clock") else self.mode,
                 "default": dict(self.default, source=redact_source(self.default["source"])),
+                "view": dict(self.view),
                 "layers": [{"owner": l["owner"], "mode": l["mode"],
                             "source": redact_source(l["source"]) if l["mode"] not in ("text", "clock") else l["mode"],
                             "after": l["after"],
