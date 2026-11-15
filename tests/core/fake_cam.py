@@ -36,7 +36,8 @@ from dosen_core import g711  # noqa: E402
 HOST, PORT = "127.0.0.1", 34567
 SCREEN_WORK = {"WorkMode": "Timing", "WorkTime": 30, "WorkLuminance": 60}   # Dev.ScreenWorkMode
 CONFIGS = {"fVideo.Volume": [{"AudioMode": "Single", "LeftVolume": 50, "RightVolume": 50}],
-           "fVideo.VolumeIn": [{"AnrOpen": True, "AudioMode": "Single", "LeftVolume": 50, "RightVolume": 50}]}
+           "fVideo.VolumeIn": [{"AnrOpen": True, "AudioMode": "Single", "LeftVolume": 50, "RightVolume": 50}],
+           "Consumer.CommDevCfg": {"CheckX1Remote": False, "KeyAudioTip": True}}
 TALK_LOG = "/tmp/fake-cam-talk.bin"
 AVTALK_LOG = "/tmp/fake-cam-avtalk.log"   # claim JSON + one line per media packet
 

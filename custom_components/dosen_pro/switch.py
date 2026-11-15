@@ -18,7 +18,7 @@ from .entity import DosenEntity
 
 async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities) -> None:
     c = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([DosenMuteSwitch(c), DosenShowChat(c), DosenMicAnr(c)])
+    async_add_entities([DosenMuteSwitch(c), DosenShowChat(c), DosenMicAnr(c), DosenKeyTip(c)])
 
 
 class DosenMuteSwitch(DosenEntity, SwitchEntity, RestoreEntity):
@@ -91,6 +91,40 @@ class DosenMicAnr(CoordinatorEntity, SwitchEntity):
     async def _dat(self, on: bool) -> None:
         try:
             self.coordinator.audio = await self.coordinator.api.audio_set(anr=on)
+        except DosenApiError as exc:
+            raise HomeAssistantError(f"Dosen Pro: {exc}") from exc
+        self.coordinator.async_update_listeners()
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self._dat(True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self._dat(False)
+
+
+class DosenKeyTip(CoordinatorEntity, SwitchEntity):
+    """Tiếng bíp khi bấm nút gọi / phím trên thân camera (``Consumer.CommDevCfg.KeyAudioTip``). Cài đặt thật của camera."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Tiếng bíp khi nhấn nút"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.entry.entry_id}-key-tip"
+        self._attr_device_info = device_info(coordinator.entry.entry_id)
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.audio.get("key_tip") is not None          # camera không có cài đặt này thì ẩn đi
+
+    @property
+    def is_on(self) -> bool | None:
+        return self.coordinator.audio.get("key_tip")
+
+    async def _dat(self, on: bool) -> None:
+        try:
+            self.coordinator.audio = await self.coordinator.api.audio_set(key_tip=on)
         except DosenApiError as exc:
             raise HomeAssistantError(f"Dosen Pro: {exc}") from exc
         self.coordinator.async_update_listeners()

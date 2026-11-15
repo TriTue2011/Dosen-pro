@@ -522,3 +522,18 @@ async def test_default_screen_is_retried_until_its_camera_exists(hass, monkeypat
     await pkg._apply_default_safe(c)
     assert c.n == len(pkg.DEFAULT_RETRY_DELAYS)                                  # bỏ cuộc sau số lần đã định
     assert caplog.text.count("Không áp dụng được màn hình mặc định") == 1        # chỉ báo MỘT lần, không dội log
+
+
+async def test_button_beep_switch_reads_and_writes_the_camera_setting(hass):
+    await _setup(hass)
+    cam = _cam()
+    await hass.async_block_till_done()
+    for _ in range(40):                                              # âm lượng/tiếng bíp đọc từ camera lúc khởi động
+        if hass.states.get("switch.dosen_pro_tieng_bip_khi_nhan_nut").state != "unavailable":
+            break
+        await asyncio.sleep(0.05)
+    assert hass.states.get("switch.dosen_pro_tieng_bip_khi_nhan_nut").state == "on"
+    await hass.services.async_call("switch", "turn_off", {"entity_id": "switch.dosen_pro_tieng_bip_khi_nhan_nut"}, blocking=True)
+    assert cam.audio_calls[-1] == {"speaker": None, "mic": None, "anr": None, "key_tip": False}
+    assert hass.states.get("switch.dosen_pro_tieng_bip_khi_nhan_nut").state == "off"
+    assert hass.states.get("switch.dosen_pro_chong_on_mic_camera").state == "on"       # công tắc khác không bị đụng

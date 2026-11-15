@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from .audio import MicSession, TalkSession
 from .config import CamConfig
-from .dvrip import DVRIPClient
+from .dvrip import DVRIPClient, DVRIPError
 from .events import AlarmSession, other_record
 from .screen import Screen
 from .speaker import Speaker
@@ -34,6 +34,7 @@ class Camera:
 
     # -- âm lượng loa / mic của chính camera (cài đặt thật, app iCSee cũng thấy) ------------------
     _SPK, _MIC = "fVideo.Volume", "fVideo.VolumeIn"
+    _KEYS = "Consumer.CommDevCfg"            # {"KeyAudioTip": bool, ...}: tiếng bíp khi bấm phím/nút trên thân camera
 
     def _control(self) -> DVRIPClient:
         client = DVRIPClient(self.cfg.cam_ip, self.cfg.cam_port, self.cfg.dvrip_connect_timeout,
@@ -51,25 +52,39 @@ class Camera:
         v = reply.get(name)
         return dict(v[0]) if isinstance(v, list) and v and isinstance(v[0], dict) else {}
 
+    def _key_cfg(self, client: DVRIPClient) -> dict:
+        """Cấu hình phím của camera; camera đời khác không có thì trả {}."""
+        try:
+            v = client.get_config(self._KEYS).get(self._KEYS)
+        except DVRIPError:
+            return {}
+        return dict(v) if isinstance(v, dict) else {}
+
     def get_audio(self) -> dict:
-        """{"speaker": 0..100, "mic": 0..100, "anr": bool|None} đọc từ camera (một lần đăng nhập)."""
+        """{"speaker": 0..100, "mic": 0..100, "anr": bool|None, "key_tip": bool|None} đọc từ camera (một lần đăng nhập)."""
         client = self._control()
         try:
             spk = self._first(client.get_config(self._SPK), self._SPK)
             mic = self._first(client.get_config(self._MIC), self._MIC)
+            key = self._key_cfg(client)
         finally:
             client.close()
-        return {"speaker": spk.get("LeftVolume"), "mic": mic.get("LeftVolume"), "anr": mic.get("AnrOpen")}
+        return {"speaker": spk.get("LeftVolume"), "mic": mic.get("LeftVolume"), "anr": mic.get("AnrOpen"),
+                "key_tip": key.get("KeyAudioTip")}
 
-    def set_audio(self, speaker: int | None = None, mic: int | None = None, anr: bool | None = None) -> dict:
-        """Đặt âm lượng loa / mic (0..100) và chống ồn mic. Chỉ đổi phần được truyền; các trường khác giữ nguyên."""
+    def set_audio(self, speaker: int | None = None, mic: int | None = None, anr: bool | None = None,
+                  key_tip: bool | None = None) -> dict:
+        """Đặt âm lượng loa / mic (0..100), chống ồn mic, tiếng bíp khi bấm nút. Chỉ đổi phần được truyền; các trường
+        khác giữ nguyên."""
         for name, v in (("speaker", speaker), ("mic", mic)):
             if v is not None and (not isinstance(v, int) or isinstance(v, bool) or not 0 <= v <= 100):
                 raise ValueError(f"{name} must be an integer 0..100")
         if anr is not None and not isinstance(anr, bool):
             raise ValueError("anr must be true or false")
-        if speaker is None and mic is None and anr is None:
-            raise ValueError("give speaker, mic and/or anr")
+        if key_tip is not None and not isinstance(key_tip, bool):
+            raise ValueError("key_tip must be true or false")
+        if speaker is None and mic is None and anr is None and key_tip is None:
+            raise ValueError("give speaker, mic, anr and/or key_tip")
         client = self._control()
         try:
             if speaker is not None:
@@ -83,6 +98,12 @@ class Camera:
                 if anr is not None:
                     cur["AnrOpen"] = anr
                 client.set_config(self._MIC, [cur])
+            if key_tip is not None:
+                cur = self._key_cfg(client)
+                if not cur:
+                    raise ValueError("this camera has no button-sound setting")
+                cur["KeyAudioTip"] = key_tip
+                client.set_config(self._KEYS, cur)
         finally:
             client.close()
         return self.get_audio()

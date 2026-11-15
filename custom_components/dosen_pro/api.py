@@ -82,8 +82,8 @@ class LocalApi:
         return await self._run(self.camera.get_audio)
 
     async def audio_set(self, speaker: int | None = None, mic: int | None = None,
-                        anr: bool | None = None) -> dict[str, Any]:
-        return await self._run(self.camera.set_audio, speaker, mic, anr)
+                        anr: bool | None = None, key_tip: bool | None = None) -> dict[str, Any]:
+        return await self._run(self.camera.set_audio, speaker, mic, anr, key_tip)
 
     # -- loa ----------------------------------------------------------------
     async def speaker_play(self, source: str, volume: float = 1.0) -> dict[str, Any]:
