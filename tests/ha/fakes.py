@@ -54,9 +54,28 @@ class FakeScreen:
         return {}
 
 
+class FakeStream:
+    def __init__(self):
+        self.fed, self.closed = bytearray(), False
+        self.bytes_fed = 0
+
+    def feed(self, data):
+        self.fed += data
+        self.bytes_fed += len(data)
+
+    def close(self):
+        self.closed = True
+
+
 class FakeSpeaker:
     def __init__(self):
         self.calls = []
+        self.streams = []
+
+    def open_stream(self):
+        self.calls.append(("stream",))
+        self.streams.append(FakeStream())
+        return self.streams[-1]
 
     def status(self):
         return {"playing": False, "route": "", "source": "", "bytes_sent": 0, "last_error": None}

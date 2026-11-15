@@ -411,3 +411,46 @@ async def test_stt_audio_is_saved_with_the_recognised_text_for_diagnosis(hass):
     assert "nghe ra: bật đèn bếp" in txt and "ti_le_cat_dinh: 1.0000" in txt
     with wave.open(os.path.join(d, "last.wav")) as w:
         assert w.getframerate() == 16000 and w.getnframes() == 1024
+
+
+async def test_camera_entity_exposes_the_cameras_own_rtsp_stream_with_audio(hass):
+    """Cuộc gọi Zalo chọn «Camera» và «Mic» đều là thực thể này: địa chỉ RTSP của chính camera (hình + tiếng)."""
+    from homeassistant.components import camera as ha_camera
+    await _setup(hass)
+    assert hass.states.get("camera.dosen_pro_camera") is not None
+    src = await ha_camera.async_get_stream_source(hass, "camera.dosen_pro_camera")
+    assert src == "rtsp://172.16.10.19:554/user=jdja&password=" + DATA[CONF_PASSWORD] + "&channel=1&stream=1.sdp"
+    assert "password" not in str(hass.states.get("camera.dosen_pro_camera").attributes)   # không lộ ra thuộc tính
+
+
+async def test_intercom_key_is_generated_once_and_survives_a_reload(hass):
+    entry = await _setup(hass)
+    key = entry.data["intercom_key"]
+    assert len(key) >= 24
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.data["intercom_key"] == key
+
+
+async def test_intercom_posts_alaw_to_the_speaker_with_the_key_and_pauses_assist(hass, hass_client_no_auth):
+    entry = await _setup(hass)
+    client = await hass_client_no_auth()
+    base = f"/api/dosen_pro/intercom/{entry.entry_id}"
+    assert (await client.post(base, data=b"\xd5" * 320)).status == 401                    # không khoá
+    assert (await client.post(base + "?k=sai", data=b"\xd5" * 320)).status == 401         # sai khoá
+    assert (await client.post("/api/dosen_pro/intercom/khong-co?k=x", data=b"")).status == 401
+    resp = await client.post(base + "?k=" + entry.data["intercom_key"], data=b"\xd5" * 960)
+    assert resp.status == 200 and (await resp.json())["bytes"] == 960
+    st = _cam().speaker.streams[-1]
+    assert bytes(st.fed) == b"\xd5" * 960 and st.closed is True                           # đóng luồng khi cuộc gọi hết
+    assert hass.data[DOMAIN][entry.entry_id].in_call is False                              # nhả cờ → Assist nghe lại
+
+
+async def test_intercom_refuses_a_second_call_and_the_satellite_stops_listening_meanwhile(hass, hass_client_no_auth):
+    entry = await _setup(hass)
+    coord = hass.data[DOMAIN][entry.entry_id]
+    client = await hass_client_no_auth()
+    coord.set_in_call(True)                                                                # đang có một cuộc gọi
+    resp = await client.post(f"/api/dosen_pro/intercom/{entry.entry_id}?k={entry.data['intercom_key']}", data=b"\xd5" * 320)
+    assert resp.status == 409
+    assert coord.in_call is True                                                           # cuộc gọi kia không bị phá

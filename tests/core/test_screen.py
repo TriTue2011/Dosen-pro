@@ -219,3 +219,46 @@ def test_clock_render():
     from dosen_core.render import render_clock
     png = render_clock(datetime(2026, 11, 15, 9, 5))
     assert png[:8] == b"\x89PNG\r\n\x1a\n" and len(png) > 1000
+
+
+def test_live_stream_goes_to_the_talk_channel_and_a_new_play_cuts_it_off(fake_cam_avtalk, cfg):
+    """Tiếng người bên kia (A-law 8 kHz) đẩy vào loa theo thời gian thật; phát nguồn khác thì luồng cũ hết hiệu lực."""
+    talk = TalkSession(cfg)
+    spk = Speaker(talk)
+    try:
+        if os.path.exists("/tmp/fake-cam-talk.bin"):
+            os.remove("/tmp/fake-cam-talk.bin")
+        st = spk.open_stream()
+        assert spk.status()["playing"] is True
+        for _ in range(10):
+            st.feed(b"\xd5" * 320)
+        assert _wait(lambda: os.path.exists("/tmp/fake-cam-talk.bin") and os.path.getsize("/tmp/fake-cam-talk.bin") >= 3200)
+        assert spk.status()["route"] == "optalk" and spk.status()["bytes_sent"] == 3200
+        spk.play("lavfi:sine=frequency=440:duration=0.3")                # nguồn khác đè lên: luồng cũ bị cắt
+        n = st.bytes_fed
+        st.feed(b"\xd5" * 320)
+        assert st.closed is True and st.bytes_fed == n
+        _wait(lambda: spk.status()["playing"] is False)
+    finally:
+        spk.stop()
+    assert talk.running is False
+
+
+def test_live_stream_switches_to_avtalk_when_the_screen_opens_mid_call(fake_cam_avtalk, cfg):
+    talk = TalkSession(cfg)
+    scr = Screen(cfg)
+    spk = Speaker(talk, scr)
+    try:
+        st = spk.open_stream()
+        st.feed(b"\xd5" * 320)
+        assert spk.status()["route"] == "optalk" and talk.running is True
+        scr.show_text("Zalo", ["đang gọi"])                              # cuộc gọi bật màn hình giữa chừng
+        assert _wait(lambda: scr.audio_sink() is not None)
+        st.feed(b"\xd5" * 320)
+        assert spk.status()["route"] == "avtalk" and talk.running is False   # OPTalk đóng, AVTalk giữ loa
+        assert _wait(lambda: scr.status()["sender"]["audio_packets"] >= 1)
+        st.close()
+        assert spk.status()["playing"] is False
+    finally:
+        spk.stop()
+        scr.off()

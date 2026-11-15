@@ -23,6 +23,54 @@ log = logging.getLogger("icsee.speaker")
 _CHUNK = 640            # 40 ms of PCM16 at 8 kHz = one talk packet
 
 
+class SpeakerStream:
+    """Tiếng G.711 A-law 8 kHz đẩy vào loa theo thời gian thật (tiếng người bên kia trong cuộc gọi).
+
+    Đường đi chọn MỖI LẦN gửi: màn hình đang mở thì đi kênh tiếng của AVTalk (camera từ chối OPTalk khi AVTalk giữ
+    loa), không thì đi OPTalk. Cuộc gọi bật màn hình giữa chừng nên đường có thể đổi; khi sang AVTalk thì đóng
+    OPTalk mà ta đã mở."""
+
+    def __init__(self, speaker: "Speaker") -> None:
+        self._sp = speaker
+        self.closed = False
+        self.bytes_fed = 0
+
+    def feed(self, alaw: bytes) -> None:
+        if self.closed or not alaw:
+            return
+        sp = self._sp
+        sink = sp._screen.audio_sink() if sp._screen is not None else None
+        if sink is not None:
+            if sp._we_started_talk:
+                sp._talk.stop()
+                sp._we_started_talk = False
+            sp.route = "avtalk"
+            sink.push_audio(alaw)
+        else:
+            if not sp._talk.running:
+                sp._talk.start()
+                sp._we_started_talk = True
+            sp.route = "optalk"
+            sp._talk.send_g711a(alaw)
+        self.bytes_fed += len(alaw)
+        sp.bytes_sent += len(alaw)
+
+    def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        sp = self._sp
+        with sp._lock:
+            if sp._stream is self:
+                sp._stream = None
+                sp.playing = False
+                if sp._we_started_talk:
+                    time.sleep(0.3)                    # để camera phát nốt phần đệm
+                    sp._talk.stop()
+                    sp._we_started_talk = False
+        log.info("loa: luong truc tiep xong (%d byte)", self.bytes_fed)
+
+
 class Speaker:
     def __init__(self, talk: TalkSession, screen=None, ffmpeg: str = "ffmpeg"):
         self._ffmpeg = ffmpeg
@@ -37,6 +85,18 @@ class Speaker:
         self.bytes_sent = 0
         self.last_error: str | None = None
         self._we_started_talk = False
+        self._stream: SpeakerStream | None = None
+
+    def open_stream(self) -> SpeakerStream:
+        """Mở luồng tiếng trực tiếp (A-law 8 kHz) vào loa; thay mọi thứ đang phát và luồng trực tiếp trước đó."""
+        with self._lock:
+            self._stop_proc()                          # cũng ngắt luồng trực tiếp trước đó
+            stream = SpeakerStream(self)
+            self._stream = stream
+            self.source, self.playing, self.last_error = "(luong truc tiep)", True, None
+            self.bytes_sent = 0
+        log.info("loa: mo luong truc tiep")
+        return stream
 
     def play(self, source: str, volume: float = 1.0) -> dict:
         if not 0.0 <= volume <= 4.0:
@@ -125,6 +185,9 @@ class Speaker:
                 log.info("loa: xong (%d byte)", self.bytes_sent)
 
     def _stop_proc(self) -> None:
+        if self._stream is not None:                   # phát nguồn khác / dừng: luồng trực tiếp cũ hết hiệu lực
+            self._stream.closed = True
+            self._stream = None
         self._token += 1
         if self._proc is not None:
             try:

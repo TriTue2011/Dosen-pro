@@ -203,7 +203,7 @@ class DosenSatellite(DosenEntity, AssistSatelliteEntity):
                     n += 1
                     if n % 8 == 0:                                   # ~2 lần/giây: cho cảm biến «Mức mic»
                         self._data.set_mic_level(muc_db(khuc))
-                    if self._dang_noi or self._data.mic_muted:
+                    if self._dang_noi or self._data.mic_muted or self._data.in_call:
                         continue
                     if self._hang.full():
                         self._hang.get_nowait()

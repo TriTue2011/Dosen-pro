@@ -92,6 +92,10 @@ class LocalApi:
     async def speaker_play_bytes(self, audio: bytes, volume: float = 1.0) -> dict[str, Any]:
         return await self._run(self.camera.speaker.play_bytes, audio, volume)
 
+    async def speaker_open_stream(self):
+        """Luồng tiếng trực tiếp (A-law 8 kHz) vào loa: đối tượng có ``feed(bytes)`` và ``close()``."""
+        return await self._run(self.camera.speaker.open_stream)
+
     async def speaker_stop(self) -> dict[str, Any]:
         return await self._run(self.camera.speaker.stop)
 

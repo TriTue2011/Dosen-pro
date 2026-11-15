@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 from datetime import timedelta
 
 import voluptuous as vol
@@ -17,15 +18,16 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.util import dt as dt_util
 
 from .api import DosenApiError, LocalApi
-from .const import (CONF_ALARM_EVENTS, CONF_URL, DEFAULT_MODES, DEFAULT_PORT, DOMAIN, EVENT_ALARM,
+from .const import (CONF_INTERCOM_KEY, CONF_ALARM_EVENTS, CONF_URL, DEFAULT_MODES, DEFAULT_PORT, DOMAIN, EVENT_ALARM,
                     OPT_HA_URL, SCAN_INTERVAL_SECONDS)
 from .dosen_core.camera import Camera
+from .intercom import DosenIntercomView
 from .dosen_core.config import CamConfig
 from .dosen_core.screen import FITS, ROTATIONS
 from .resolve import resolve_camera, resolve_image, resolve_media, resolve_source
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = [Platform.ASSIST_SATELLITE, Platform.BUTTON, Platform.EVENT, Platform.MEDIA_PLAYER,
+PLATFORMS = [Platform.ASSIST_SATELLITE, Platform.BUTTON, Platform.CAMERA, Platform.EVENT, Platform.MEDIA_PLAYER,
              Platform.NUMBER, Platform.SELECT, Platform.SENSOR, Platform.SWITCH, Platform.TEXT]
 
 _MESSAGE = vol.Schema({
@@ -92,6 +94,8 @@ class DosenCoordinator(DataUpdateCoordinator):
         self.entry = entry
         # Trạng thái chạy của vệ tinh Assist (đặt bởi các thực thể công tắc/số).
         self.mic_muted = False
+        self._default_lock = asyncio.Lock()
+        self.in_call = False              # bộ đàm đang đưa tiếng cuộc gọi ra loa: vệ tinh Assist ngừng nghe
         self.mic_gain_db = 0.0
         self.show_chat = True
         self.alarm_events_on = True
@@ -114,8 +118,13 @@ class DosenCoordinator(DataUpdateCoordinator):
         return (self.entry.options.get(OPT_HA_URL) or "").strip() or None
 
     async def apply_default(self) -> None:
-        """Gửi màn hình mặc định (loại + nguồn chọn trên các thực thể) xuống dịch vụ. Chưa từng chọn loại thì
-        không đụng tới mặc định dịch vụ đang lưu. Lỗi được ném ra để người dùng thấy trên giao diện."""
+        """Gửi màn hình mặc định (loại + nguồn chọn trên các thực thể) xuống camera. Chưa từng chọn loại thì
+        không đụng tới mặc định đang lưu. Lỗi được ném ra để người dùng thấy trên giao diện. Các lần gọi nối đuôi
+        nhau (lần khởi động và lần người dùng chọn có thể chồng nhau): mỗi lần đọc lựa chọn MỚI NHẤT khi tới lượt."""
+        async with self._default_lock:
+            await self._apply_default_locked()
+
+    async def _apply_default_locked(self) -> None:
         mode = self.default_mode
         if mode is None:
             return
@@ -140,6 +149,10 @@ class DosenCoordinator(DataUpdateCoordinator):
         except DosenApiError as exc:
             raise HomeAssistantError(f"Dosen Pro: {exc}") from exc
         await self.async_request_refresh()
+
+    @callback
+    def set_in_call(self, in_call: bool) -> None:
+        self.in_call = in_call
 
     @callback
     def set_mic_level(self, db: float | None) -> None:
@@ -281,6 +294,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     holder["coord"] = coord
     await coord.async_config_entry_first_refresh()
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coord
+    if not entry.data.get(CONF_INTERCOM_KEY):          # chưa có khoá bộ đàm (mục mới / vừa cấu hình lại): sinh một khoá
+        hass.config_entries.async_update_entry(entry, data={**entry.data, CONF_INTERCOM_KEY: secrets.token_urlsafe(24)})
+    if not hass.data.get(f"{DOMAIN}_view"):
+        hass.http.register_view(DosenIntercomView())
+        hass.data[f"{DOMAIN}_view"] = True
     if not hass.services.has_service(DOMAIN, "screen_show"):
         for name, schema in SERVICE_SCHEMAS.items():
             async def _svc(call: ServiceCall, _hass=hass) -> None:

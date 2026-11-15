@@ -22,6 +22,9 @@ ASSIST_OWNER = "assist"
 OPT_HA_URL = "ha_url"              # địa chỉ HA mà dịch vụ Docker dùng để tải ảnh/video (nếu HA chưa có địa chỉ nội bộ)
 ROTATE_OPTIONS = ["0°", "90°", "180°", "270°"]          # xoay hình theo chiều kim đồng hồ
 FIT_OPTIONS = {"Vừa khung (có viền)": "contain", "Lấp đầy (cắt rìa)": "cover"}
+CONF_INTERCOM_KEY = "intercom_key"   # khoá trong địa chỉ bộ đàm (Zalo Call đọc từ dữ liệu mục cấu hình, như loa R1)
+RTSP_PORT = 554
+RTSP_STREAM = 1                      # 0 = luồng chính, 1 = luồng phụ (800x448 HEVC + tiếng A-law, đo trên camera thật)
 NONE_OPTION = "—"                  # «chưa chọn» trong các ô chọn camera/ảnh
 
 
