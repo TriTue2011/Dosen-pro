@@ -1,0 +1,39 @@
+# Kiểm thử: dịch vụ Docker (server/) và tích hợp Home Assistant (custom_components/).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Cài ffmpeg (có libx265) như ảnh Docker
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core
+      - run: pip install -r server/requirements.txt
+      - name: Test dịch vụ (camera giả, ffmpeg thật)
+        working-directory: server
+        run: python -m pytest tests -q
+
+  custom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install pytest-homeassistant-custom-component
+      - name: Test tích hợp Home Assistant
+        run: python -m pytest tests -q

@@ -1,0 +1,13 @@
+{
+  "domain": "dosen_pro",
+  "name": "Dosen Pro",
+  "codeowners": ["@TriTue2011"],
+  "config_flow": true,
+  "dependencies": ["http", "media_source"],
+  "documentation": "https://github.com/TriTue2011/Dosen-pro",
+  "integration_type": "device",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/TriTue2011/Dosen-pro/issues",
+  "requirements": [],
+  "version": "2026.11.15.0"
+}

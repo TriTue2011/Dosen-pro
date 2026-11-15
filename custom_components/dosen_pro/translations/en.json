@@ -1,0 +1,21 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Dosen Pro",
+        "description": "Address of the Dosen Pro Docker service",
+        "data": {
+          "url": "URL (http://host:8080)",
+          "api_key": "API key (if any)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Cannot reach the service",
+      "invalid_auth": "Wrong API key"
+    },
+    "abort": {
+      "already_configured": "Already configured"
+    }
+  }
+}

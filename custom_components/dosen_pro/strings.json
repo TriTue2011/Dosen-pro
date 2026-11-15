@@ -1,0 +1,7 @@
+{
+  "config": {
+    "step": {"user": {"title": "Dosen Pro", "description": "Địa chỉ dịch vụ Docker Dosen Pro", "data": {"url": "Địa chỉ (http://máy:8080)", "api_key": "Khoá API (nếu có)"}}},
+    "error": {"cannot_connect": "Không nối được dịch vụ", "invalid_auth": "Khoá API sai"},
+    "abort": {"already_configured": "Đã cấu hình"}
+  }
+}

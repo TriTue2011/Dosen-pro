@@ -1,0 +1,11 @@
+# Chạy dịch vụ Dosen Pro từ ảnh dựng sẵn. Điền .env (xem server/.env.example) rồi: docker compose up -d
+services:
+  dosen-pro:
+    image: ghcr.io/tritue2011/dosen-pro:latest
+    container_name: dosen-pro
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8080:8080"
+    # Dịch vụ chỉ nối ra ngoài: camera (DVRIP, cổng 34567) và nguồn video/âm thanh trong LAN.
+    # Camera khác mạng con với Docker thì dùng network_mode: host.

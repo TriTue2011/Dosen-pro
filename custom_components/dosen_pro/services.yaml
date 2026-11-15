@@ -1,0 +1,52 @@
+screen_show:
+  fields:
+    source:
+      required: true
+      example: "http://192.168.1.10:8123/local/clip.mp4"
+      selector: {text: {}}
+    loop:
+      default: false
+      selector: {boolean: {}}
+    after:
+      default: "off"
+      selector:
+        select:
+          options: ["off", "hold"]
+    entry_id:
+      selector: {text: {}}
+screen_text:
+  fields:
+    title:
+      example: "Trợ lý"
+      selector: {text: {}}
+    messages:
+      example: '[{"role": "user", "text": "Bật đèn"}, {"role": "assistant", "text": "Đã bật."}]'
+      selector: {object: {}}
+    font_size:
+      default: 15
+      selector: {number: {min: 10, max: 30, mode: box}}
+    after:
+      default: "hold"
+      selector:
+        select:
+          options: ["off", "hold"]
+    entry_id:
+      selector: {text: {}}
+screen_off:
+  fields:
+    entry_id:
+      selector: {text: {}}
+speaker_play:
+  fields:
+    source:
+      required: true
+      selector: {text: {}}
+    volume:
+      default: 1.0
+      selector: {number: {min: 0, max: 4, step: 0.1, mode: box}}
+    entry_id:
+      selector: {text: {}}
+speaker_stop:
+  fields:
+    entry_id:
+      selector: {text: {}}
