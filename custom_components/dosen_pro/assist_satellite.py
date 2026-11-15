@@ -155,9 +155,12 @@ class DosenSatellite(DosenEntity, AssistSatelliteEntity):
                         audio_stream=self._luong_stt(), start_stage=bat_dau)
                 except asyncio.CancelledError:
                     raise
-                except RuntimeError as exc:
-                    if "Pipeline entity not found" in str(exc):       # lúc khởi động: ô chọn pipeline chưa kịp đăng ký
-                        _LOGGER.debug("%s: pipeline select not ready yet", self.entity_id)
+                except (RuntimeError, ValueError) as exc:
+                    # Lúc khởi động/nạp lại: ô chọn pipeline hay độ nhạy chưa kịp đăng ký ("not found") hoặc còn
+                    # «unavailable»/«unknown» — không phải lỗi, đợi 2 s rồi thử lại.
+                    if "Pipeline entity not found" in str(exc) or "VadSensitivity" in str(exc) \
+                            or "VAD sensitivity entity not found" in str(exc):
+                        _LOGGER.debug("%s: select not ready yet: %s", self.entity_id, exc)
                         await asyncio.sleep(2)
                         continue
                     _LOGGER.exception("%s: pipeline failed", self.entity_id)

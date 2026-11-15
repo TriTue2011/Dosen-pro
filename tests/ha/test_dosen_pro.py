@@ -21,6 +21,9 @@ from custom_components.dosen_pro.dosen_core.dvrip import DVRIPError
 DATA = {CONF_HOST: "172.16.10.19", CONF_PORT: 34567, CONF_USERNAME: "jdja", CONF_PASSWORD: "mk"}
 
 
+_REAL: dict = {}
+
+
 @pytest.fixture(autouse=True)
 def _fake_camera(monkeypatch):
     FakeCamera.instances.clear()
@@ -32,6 +35,7 @@ def _fake_camera(monkeypatch):
 
     async def _no_loop(self):                  # không mở ffmpeg/pipeline thật trong test
         return
+    _REAL.setdefault("chay", sat_mod.DosenSatellite._chay)          # test cần vòng nghe thật thì lấy lại từ đây
     monkeypatch.setattr(sat_mod.DosenSatellite, "_chay", _no_loop)
 
 
@@ -454,3 +458,36 @@ async def test_intercom_refuses_a_second_call_and_the_satellite_stops_listening_
     resp = await client.post(f"/api/dosen_pro/intercom/{entry.entry_id}?k={entry.data['intercom_key']}", data=b"\xd5" * 320)
     assert resp.status == 409
     assert coord.in_call is True                                                           # cuộc gọi kia không bị phá
+
+
+async def test_satellite_waits_quietly_while_the_vad_select_is_not_ready(hass, monkeypatch, caplog):
+    """Mỗi lần nạp lại, ô «độ nhạy nói xong» còn «unavailable» vài giây: đợi rồi thử lại, không ghi ERROR."""
+    from custom_components.dosen_pro.assist_satellite import DosenSatellite
+    calls = []
+
+    async def fake_accept(self, audio_stream=None, start_stage=None, **kw):
+        calls.append(1)
+        if len(calls) == 1:
+            raise ValueError("'unavailable' is not a valid VadSensitivity")
+        await _real_sleep(3600)
+
+    async def idle_mic(self):
+        await _real_sleep(3600)
+    monkeypatch.setattr(DosenSatellite, "_chay", _REAL["chay"])                           # vòng nghe THẬT
+    monkeypatch.setattr(DosenSatellite, "_doc_mic", idle_mic)
+    monkeypatch.setattr(DosenSatellite, "async_accept_pipeline_from_satellite", fake_accept)
+    monkeypatch.setattr("custom_components.dosen_pro.assist_satellite.asyncio.sleep", _fast_sleep, raising=False)
+    await _setup(hass)
+    for _ in range(100):
+        if len(calls) >= 2:
+            break
+        await _real_sleep(0.05)
+    assert len(calls) >= 2                                              # đã thử lại sau lỗi đầu
+    assert "pipeline failed" not in caplog.text
+
+
+_real_sleep = asyncio.sleep
+
+
+async def _fast_sleep(delay, *a, **k):
+    await _real_sleep(0 if delay == 2 else delay, *a, **k)
