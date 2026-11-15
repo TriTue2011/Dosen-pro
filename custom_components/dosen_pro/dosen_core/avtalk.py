@@ -223,6 +223,7 @@ class AVTalkSender:
         self._need_key = True
         self.live = False                    # nguồn trực tiếp: hàng đợi ngắn, chậm thì bỏ hết khung cũ nhảy tới khung khoá kế
         self.live_dropped = 0
+        self.audio_dropped = 0               # khung tiếng cũ bị bỏ để giữ độ trễ thấp (push_audio_live)
         self.running = False
         self.video_sent = 0
         self.key_sent = 0
@@ -259,6 +260,25 @@ class AVTalkSender:
             self._need_key = True
             if is_key:
                 self._q.put_nowait((is_key, au))
+
+    LIVE_AUDIO_MAX_FRAMES = 12               # 12 × 40 ms ≈ 0,5 s: tiếng cuộc gọi tồn quá mức này là đang tụt lại sau người nói
+
+    def push_audio_live(self, g711: bytes) -> None:
+        """Tiếng cuộc gọi THỜI GIAN THỰC: KHÔNG chặn người gửi và giữ hàng đợi tối đa ``LIVE_AUDIO_MAX_FRAMES``. Dồn quá mức thì bỏ tiếng CŨ
+        (còn một nửa) để bắt kịp: ``push_audio`` chặn theo nhịp 40 ms nên mọi đợt gửi dồn (nhịp nguồn lệch, vừa mở phiên) thành độ trễ CỐ ĐỊNH,
+        cộng bộ đệm TCP/aiohttp ở phía trên đã đo tới ~30 s (chủ máy 15/11)."""
+        for i in range(0, len(g711), 320):
+            if self._aq.qsize() >= self.LIVE_AUDIO_MAX_FRAMES:
+                while self._aq.qsize() > self.LIVE_AUDIO_MAX_FRAMES // 2:
+                    try:
+                        self._aq.get_nowait()
+                        self.audio_dropped += 1
+                    except queue.Empty:
+                        break
+            try:
+                self._aq.put_nowait(g711[i:i + 320].ljust(320, b"\xd5"))
+            except queue.Full:
+                self.audio_dropped += 1
 
     def push_audio(self, g711: bytes, timeout: float = 1.0) -> None:
         """Queue G.711 A-law audio (any length) for the camera speaker; blocks while
@@ -333,5 +353,5 @@ class AVTalkSender:
     def stats(self) -> dict:
         return {"video_packets": self.video_sent, "key_packets": self.key_sent,
                 "audio_packets": self.audio_sent, "bytes": self.bytes_sent,
-                "queue_overflows": self.queue_overflows, "live_dropped": self.live_dropped,
+                "queue_overflows": self.queue_overflows, "live_dropped": self.live_dropped, "audio_dropped": self.audio_dropped,
                 "queued": self._q.qsize(), "last_error": self.last_error}

@@ -45,7 +45,7 @@ class SpeakerStream:
                 sp._talk.stop()
                 sp._we_started_talk = False
             sp.route = "avtalk"
-            sink.push_audio(alaw)
+            sink.push_audio_live(alaw)                    # tiếng cuộc gọi: không chặn, giữ độ trễ ≤ ~0,5 s (xem AVTalkSender.push_audio_live)
         else:
             if not sp._talk.running:
                 sp._talk.start()
