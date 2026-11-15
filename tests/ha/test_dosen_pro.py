@@ -21,9 +21,6 @@ from custom_components.dosen_pro.dosen_core.dvrip import DVRIPError
 DATA = {CONF_HOST: "192.168.1.50", CONF_PORT: 34567, CONF_USERNAME: "admin", CONF_PASSWORD: "mk"}
 
 
-from conftest import _REAL  # noqa: E402  (fixture camera giả nằm ở conftest.py, dùng chung với test_panel.py)
-
-
 async def _setup(hass, options=None, data=None, entry_id=None):
     assert await async_setup_component(hass, "homeassistant", {})       # Assist cần thành phần này
     kw = {"entry_id": entry_id} if entry_id else {}
@@ -116,9 +113,6 @@ async def test_services_call_the_camera(hass):
     await hass.services.async_call(DOMAIN, "screen_sleep", {"luminance": 40}, blocking=True)
     assert ("off",) in cam.screen.calls and ("power", True) in cam.screen.calls
     assert _calls("sleep")[-2:] == [{"seconds": 0, "luminance": None}, {"seconds": None, "luminance": 40}]
-    await hass.services.async_call(DOMAIN, "speaker_play", {"source": "http://x/a.mp3", "volume": 0.5}, blocking=True)
-    await hass.services.async_call(DOMAIN, "speaker_stop", {}, blocking=True)
-    assert cam.speaker.calls == [("play", {"source": "http://x/a.mp3", "volume": 0.5}), ("stop",)]
     with pytest.raises(Exception):                                  # screen_sleep cần ít nhất seconds hoặc luminance
         await hass.services.async_call(DOMAIN, "screen_sleep", {}, blocking=True)
 
@@ -159,18 +153,20 @@ async def test_camera_errors_become_ha_errors(hass):
 async def test_entities_like_the_assist_camera_plus_screen(hass):
     await _setup(hass)
     ids = set(hass.states.async_entity_ids())
-    for e in ("media_player.dosen_pro_loa", "assist_satellite.dosen_pro", "number.dosen_pro_tang_mic",
-              "switch.dosen_pro_tat_mic", "sensor.dosen_pro_muc_mic", "sensor.dosen_pro_noi_dung_man_hinh",
-              "button.dosen_pro_bat_man_hinh", "button.dosen_pro_tat_man_hinh",
-              "button.dosen_pro_ve_man_hinh_mac_dinh", "button.dosen_pro_dung_loa",
-              "event.dosen_pro_su_kien_camera", "camera.dosen_pro_camera"):
+    for e in ("media_player.dosen_pro_loa", "sensor.dosen_pro_noi_dung_man_hinh",
+              "button.dosen_pro_bat_man_hinh", "button.dosen_pro_tat_man_hinh", "button.dosen_pro_ve_man_hinh_mac_dinh",
+              "event.dosen_pro_su_kien_camera", "camera.dosen_pro_camera", "number.dosen_pro_am_luong_loa_camera",
+              "number.dosen_pro_am_luong_mic_camera", "switch.dosen_pro_chong_on_mic_camera", "switch.dosen_pro_tieng_bip_khi_nhan_nut"):
         assert e in ids, (e, sorted(ids))
     # Cài đặt hiển thị nay nằm ở thẻ «Dosen Pro» (WebSocket), KHÔNG còn là thực thể trên thiết bị.
     for gone in ("select.dosen_pro_man_hinh_mac_dinh", "select.dosen_pro_camera_mac_dinh", "select.dosen_pro_anh_mac_dinh",
                  "select.dosen_pro_thoi_tiet_tren_dong_ho", "select.dosen_pro_xoay_hinh_mac_dinh", "select.dosen_pro_kieu_khung_hinh_mac_dinh",
                  "select.dosen_pro_chat_luong_hinh_tren_man", "text.dosen_pro_dia_chi_mac_dinh", "number.dosen_pro_thoi_gian_sang_man_hinh",
                  "number.dosen_pro_do_sang_man_hinh", "number.dosen_pro_thoi_gian_moi_man_luan_phien",
-                 "switch.dosen_pro_hien_hoi_thoai_tren_man_hinh", "switch.dosen_pro_luan_phien_man_hinh", "switch.dosen_pro_nguon_man_hinh"):
+                 "switch.dosen_pro_hien_hoi_thoai_tren_man_hinh", "switch.dosen_pro_luan_phien_man_hinh", "switch.dosen_pro_nguon_man_hinh",
+                 # Assist đã bỏ (mic chỉ phục vụ cuộc gọi Zalo)
+                 "assist_satellite.dosen_pro", "select.dosen_pro", "select.dosen_pro_2", "number.dosen_pro_tang_mic",
+                 "switch.dosen_pro_tat_mic", "sensor.dosen_pro_muc_mic", "button.dosen_pro_dung_loa"):
         assert gone not in ids, gone
     assert hass.states.get("sensor.dosen_pro_noi_dung_man_hinh").state == "off"
 
@@ -182,8 +178,6 @@ async def test_numbers_buttons_and_media_player(hass):
                         ("button.dosen_pro_ve_man_hinh_mac_dinh", ("off",))):
         await hass.services.async_call("button", "press", {"entity_id": ent}, blocking=True)
         assert expect in cam.screen.calls
-    await hass.services.async_call("button", "press", {"entity_id": "button.dosen_pro_dung_loa"}, blocking=True)
-    assert ("stop",) in cam.speaker.calls
     ent = "media_player.dosen_pro_loa"
     assert hass.states.get(ent).state == "idle"
     await hass.services.async_call(MP_DOMAIN, "play_media", {"entity_id": ent, "media_content_id": "http://example.com/a.mp3", "media_content_type": "music"}, blocking=True)
@@ -260,61 +254,10 @@ async def test_camera_alarms_become_bus_events_and_an_event_entity(hass):
     assert hass.states.get("event.dosen_pro_su_kien_camera").attributes["event_type"] == "alarm"
 
 
-async def test_assist_conversation_is_shown_on_the_camera_screen(hass):
-    from homeassistant.components.assist_pipeline import PipelineEvent, PipelineEventType
-    from homeassistant.components.assist_satellite.const import DOMAIN as AS_DOMAIN
-    await _setup(hass)
-    sat = hass.data[AS_DOMAIN].get_entity("assist_satellite.dosen_pro")
-    sat.on_pipeline_event(PipelineEvent(PipelineEventType.WAKE_WORD_END, {"wake_word_output": {}}))
-    sat.on_pipeline_event(PipelineEvent(PipelineEventType.STT_END, {"stt_output": {"text": "bật đèn phòng khách"}}))
-    sat.on_pipeline_event(PipelineEvent(PipelineEventType.INTENT_END, {"intent_output": {
-        "response": {"speech": {"plain": {"speech": "Đã bật đèn."}}}, "continue_conversation": False}}))
-    await asyncio.sleep(0.4)
-    await hass.async_block_till_done()
-    t = _calls("text")[-1]
-    assert t["owner"] == "assist" and t["ttl"] == 60 and t["title"] == "Trợ lý"                   # lớp riêng của Assist, có hạn
-    assert [(m["role"], m["text"]) for m in t["messages"]] == [("user", "bật đèn phòng khách"), ("assistant", "Đã bật đèn.")]
-    await hass.data[DOMAIN][next(iter(hass.data[DOMAIN]))].display.async_set({"show_chat": False})
-    n = len(_calls("text"))
-    sat.on_pipeline_event(PipelineEvent(PipelineEventType.STT_END, {"stt_output": {"text": "xin chào"}}))
-    await asyncio.sleep(0.4)
-    assert len(_calls("text")) == n                                            # tắt «Hiện hội thoại» ở thẻ thì không vẽ gì nữa
 
 
-async def test_listening_text_is_released_when_the_run_ends_without_a_reply(hass, monkeypatch):
-    """Gọi «alexa» rồi không nói gì: lượt kết thúc không có TTS, «Đang nghe…» không được treo tới hết hạn 60 s."""
-    from homeassistant.components.assist_pipeline import PipelineEvent, PipelineEventType
-    from homeassistant.components.assist_satellite.const import DOMAIN as AS_DOMAIN
-    from custom_components.dosen_pro import assist_satellite as sat_mod
-    monkeypatch.setattr(sat_mod, "CHAT_HOLD_SECONDS", 0.1)
-    await _setup(hass)
-    sat = hass.data[AS_DOMAIN].get_entity("assist_satellite.dosen_pro")
-    sat.on_pipeline_event(PipelineEvent(PipelineEventType.WAKE_WORD_END, {"wake_word_output": {}}))
-    await asyncio.sleep(0.4)
-    assert _calls("text")[-1]["messages"][-1]["text"] == "Đang nghe…"
-    assert ("release", "assist") not in _cam().screen.calls
-    sat.on_pipeline_event(PipelineEvent(PipelineEventType.RUN_END, {}))
-    await asyncio.sleep(0.5)
-    assert ("release", "assist") in _cam().screen.calls
 
 
-async def test_mic_level_sensor_follows_the_satellite_stream(hass):
-    import array
-    import math
-
-    from custom_components.dosen_pro.assist_satellite import muc_db
-    quiet = array.array("h", [10] * 1024).tobytes()
-    loud = array.array("h", [int(16000 * math.sin(i / 5)) for i in range(1024)]).tobytes()
-    assert muc_db(quiet) < -60 < -10 < muc_db(loud) and muc_db(b"") == -90.0
-    entry = await _setup(hass)
-    coord = hass.data[DOMAIN][entry.entry_id]
-    assert hass.states.get("sensor.dosen_pro_muc_mic").state == "unknown"
-    coord.set_mic_level(muc_db(loud))
-    await hass.async_block_till_done()
-    assert float(hass.states.get("sensor.dosen_pro_muc_mic").state) > -20
-    coord.set_mic_level(None)
-    await hass.async_block_till_done()
-    assert hass.states.get("sensor.dosen_pro_muc_mic").state == "unknown"
 
 
 # -- vòng đời -------------------------------------------------------------------------------
@@ -385,30 +328,6 @@ async def test_rotate_and_fit_are_default_screen_settings_only(hass):
     assert cam.screen.calls[-1] == ("view", {"rotate": 90, "fit": "cover"})
 
 
-async def test_stt_audio_is_saved_with_the_recognised_text_for_diagnosis(hass):
-    """«Hỏi một đằng nghe một nẻo»: giữ lại đúng đoạn tiếng gửi bộ nhận giọng + chữ nó nghe ra + số đo."""
-    import os
-    import wave
-    from homeassistant.components.assist_pipeline import PipelineEvent, PipelineEventType
-    from homeassistant.components.assist_satellite.const import DOMAIN as AS_DOMAIN
-    await _setup(hass)
-    sat = hass.data[AS_DOMAIN].get_entity("assist_satellite.dosen_pro")
-    sat._ring.append((32767).to_bytes(2, "little", signed=True) * 1024)           # một khúc bị cắt đỉnh
-    sat.on_pipeline_event(PipelineEvent(PipelineEventType.STT_END, {"stt_output": {"text": "bật đèn bếp"}}))
-    await hass.async_block_till_done()
-    d = hass.config.path("dosen_pro_stt")
-    txt = ""
-    for _ in range(60):                                     # thư mục cấu hình của test dùng chung: chờ đúng lượt của test này
-        try:
-            txt = open(os.path.join(d, "last.txt"), encoding="utf-8").read()
-        except OSError:
-            txt = ""
-        if "bật đèn bếp" in txt:
-            break
-        await asyncio.sleep(0.05)
-    assert "nghe ra: bật đèn bếp" in txt and "ti_le_cat_dinh: 1.0000" in txt
-    with wave.open(os.path.join(d, "last.wav")) as w:
-        assert w.getframerate() == 16000 and w.getnframes() == 1024
 
 
 async def test_camera_entity_exposes_the_cameras_own_rtsp_stream_with_audio(hass):
@@ -430,7 +349,7 @@ async def test_intercom_key_is_generated_once_and_survives_a_reload(hass):
     assert entry.data["intercom_key"] == key
 
 
-async def test_intercom_posts_alaw_to_the_speaker_with_the_key_and_pauses_assist(hass, hass_client_no_auth):
+async def test_intercom_posts_alaw_to_the_speaker_with_the_key(hass, hass_client_no_auth):
     entry = await _setup(hass)
     client = await hass_client_no_auth()
     base = f"/api/dosen_pro/intercom/{entry.entry_id}"
@@ -441,10 +360,10 @@ async def test_intercom_posts_alaw_to_the_speaker_with_the_key_and_pauses_assist
     assert resp.status == 200 and (await resp.json())["bytes"] == 960
     st = _cam().speaker.streams[-1]
     assert bytes(st.fed) == b"\xd5" * 960 and st.closed is True                           # đóng luồng khi cuộc gọi hết
-    assert hass.data[DOMAIN][entry.entry_id].in_call is False                              # nhả cờ → Assist nghe lại
+    assert hass.data[DOMAIN][entry.entry_id].in_call is False                              # nhả cờ: cuộc gọi kế tiếp vào được
 
 
-async def test_intercom_refuses_a_second_call_and_the_satellite_stops_listening_meanwhile(hass, hass_client_no_auth):
+async def test_intercom_refuses_a_second_call_while_one_is_running(hass, hass_client_no_auth):
     entry = await _setup(hass)
     coord = hass.data[DOMAIN][entry.entry_id]
     client = await hass_client_no_auth()
@@ -454,30 +373,6 @@ async def test_intercom_refuses_a_second_call_and_the_satellite_stops_listening_
     assert coord.in_call is True                                                           # cuộc gọi kia không bị phá
 
 
-async def test_satellite_waits_quietly_while_the_vad_select_is_not_ready(hass, monkeypatch, caplog):
-    """Mỗi lần nạp lại, ô «độ nhạy nói xong» còn «unavailable» vài giây: đợi rồi thử lại, không ghi ERROR."""
-    from custom_components.dosen_pro.assist_satellite import DosenSatellite
-    calls = []
-
-    async def fake_accept(self, audio_stream=None, start_stage=None, **kw):
-        calls.append(1)
-        if len(calls) == 1:
-            raise ValueError("'unavailable' is not a valid VadSensitivity")
-        await _real_sleep(3600)
-
-    async def idle_mic(self):
-        await _real_sleep(3600)
-    monkeypatch.setattr(DosenSatellite, "_chay", _REAL["chay"])                           # vòng nghe THẬT
-    monkeypatch.setattr(DosenSatellite, "_doc_mic", idle_mic)
-    monkeypatch.setattr(DosenSatellite, "async_accept_pipeline_from_satellite", fake_accept)
-    monkeypatch.setattr("custom_components.dosen_pro.assist_satellite.asyncio.sleep", _fast_sleep, raising=False)
-    await _setup(hass)
-    for _ in range(100):
-        if len(calls) >= 2:
-            break
-        await _real_sleep(0.05)
-    assert len(calls) >= 2                                              # đã thử lại sau lỗi đầu
-    assert "pipeline failed" not in caplog.text
 
 
 _real_sleep = asyncio.sleep

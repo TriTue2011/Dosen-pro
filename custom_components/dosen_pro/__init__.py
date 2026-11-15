@@ -29,14 +29,15 @@ from .dosen_core.config import CamConfig
 from .card import build_card
 from .carousel import _CARD_ENTITY, _CARD_ROW, COLOR, Carousel
 from .display import DisplaySettings
+from .zalo import ZaloCallScreen
 from .websocket import async_register as ws_register
 from .dosen_core.render import CARD_LAYOUTS, CARD_THEMES
 from .dosen_core.screen import FITS, ROTATIONS
 from .resolve import resolve_camera, resolve_image, resolve_media, resolve_source
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = [Platform.ASSIST_SATELLITE, Platform.BUTTON, Platform.CAMERA, Platform.EVENT, Platform.MEDIA_PLAYER,
-             Platform.NUMBER, Platform.SELECT, Platform.SENSOR, Platform.SWITCH]
+PLATFORMS = [Platform.BUTTON, Platform.CAMERA, Platform.EVENT, Platform.MEDIA_PLAYER, Platform.NUMBER, Platform.SENSOR,
+             Platform.SWITCH]
 
 _MESSAGE = vol.Schema({
     vol.Optional("role", default="info"): vol.In(["user", "assistant", "caller", "info"]),
@@ -71,6 +72,7 @@ SERVICE_SCHEMAS = {
         vol.Optional("camera_entity"): cv.entity_id,
         vol.Optional("media"): vol.Any(cv.string, dict),
         vol.Optional("loop", default=False): cv.boolean,
+        vol.Optional("live"): cv.boolean,
         vol.Optional("after", default="off"): vol.In(["off", "hold"]),
         vol.Optional("owner", default="automation"): cv.string,
         vol.Optional("ttl"): vol.All(vol.Coerce(float), vol.Range(min=1, max=86400)),
@@ -107,12 +109,6 @@ SERVICE_SCHEMAS = {
         vol.Optional("seconds"): vol.All(vol.Coerce(int), vol.Range(min=0, max=3600)),
         vol.Optional("luminance"): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
     }), cv.has_at_least_one_key("seconds", "luminance")),
-    "speaker_play": vol.Schema({
-        vol.Optional("entry_id"): cv.string,
-        vol.Required("source"): cv.string,
-        vol.Optional("volume", default=1.0): vol.All(vol.Coerce(float), vol.Range(min=0, max=4)),
-    }),
-    "speaker_stop": vol.Schema({vol.Optional("entry_id"): cv.string}),
 }
 
 
@@ -122,13 +118,10 @@ class DosenCoordinator(DataUpdateCoordinator):
                          update_interval=timedelta(seconds=SCAN_INTERVAL_SECONDS))
         self.api = api
         self.entry = entry
-        # Trạng thái chạy của vệ tinh Assist (đặt bởi các thực thể công tắc/số).
-        self.mic_muted = False
         self._default_lock = asyncio.Lock()
         self.startup_done = asyncio.Event()      # lần áp màn mặc định lúc khởi động đã xong (thành công hay bỏ cuộc)
-        self.in_call = False              # bộ đàm đang đưa tiếng cuộc gọi ra loa: vệ tinh Assist ngừng nghe
-        self.mic_gain_db = 0.0
-        self.show_chat = True
+        self.in_call = False              # bộ đàm đang đưa tiếng cuộc gọi ra loa (một cuộc một lúc)
+        self.zalo_call_screen = True             # tự hiện cuộc gọi Zalo (tên người gọi, hình video) lên màn camera
         self.alarm_events_on = True
         self.audio: dict = {}             # âm lượng loa/mic + chống ồn đọc từ camera (rỗng = chưa đọc)
         # Cài đặt hiển thị (đặt bằng thẻ «Dosen Pro» qua WebSocket, lưu bằng Store — xem display.py).
@@ -138,16 +131,13 @@ class DosenCoordinator(DataUpdateCoordinator):
         self.default_text = ""
         self.default_quality = "standard"        # chất lượng mã hoá hình lên màn camera (standard | high | max)
         self.carousel: Carousel | None = None   # màn luân phiên (tạo khi nạp mục cấu hình)
+        self.zalo: ZaloCallScreen | None = None
         self.display: DisplaySettings | None = None   # lưu/áp cài đặt hiển thị (thẻ «Dosen Pro» điều khiển)
         self.default_weather = ""                # thực thể weather.* hiện trên đồng hồ ("" = không hiện)
         self._unsub_weather = None
         self.default_rotate = 0                  # xoay hình (độ, theo chiều kim đồng hồ) cho mọi lớp không tự nêu
         self.default_fit = "contain"             # contain = vừa khung có viền; cover = lấp đầy màn, cắt rìa
-        self.mic_level_db: float | None = None   # mức tiếng mic gần nhất (dBFS), None = chưa có luồng
-        self._on_level: list = []
         self._on_alarm: list = []
-        self._on_mute: list = []
-        self._on_gain: list = []
 
     @property
     def ha_base(self) -> str | None:
@@ -247,17 +237,6 @@ class DosenCoordinator(DataUpdateCoordinator):
         self.in_call = in_call
 
     @callback
-    def set_mic_level(self, db: float | None) -> None:
-        self.mic_level_db = db
-        for fn in list(self._on_level):
-            fn()
-
-    @callback
-    def listen_level(self, fn):
-        self._on_level.append(fn)
-        return lambda: self._on_level.remove(fn)
-
-    @callback
     def listen_alarm(self, fn):
         self._on_alarm.append(fn)
         return lambda: self._on_alarm.remove(fn)
@@ -286,30 +265,6 @@ class DosenCoordinator(DataUpdateCoordinator):
                 wait = min(wait * 2, 600)
             await asyncio.sleep(wait)
 
-    @callback
-    def set_mic_muted(self, muted: bool) -> None:
-        self.mic_muted = muted
-        for fn in list(self._on_mute):
-            fn(muted)
-
-    @callback
-    def listen_mute(self, fn):
-        self._on_mute.append(fn)
-        return lambda: self._on_mute.remove(fn)
-
-    @callback
-    def set_mic_gain(self, db: float) -> None:
-        if db == self.mic_gain_db:
-            return
-        self.mic_gain_db = db
-        for fn in list(self._on_gain):
-            fn(db)
-
-    @callback
-    def listen_gain(self, fn):
-        self._on_gain.append(fn)
-        return lambda: self._on_gain.remove(fn)
-
     async def _async_update_data(self) -> dict:
         try:
             return {"screen": await self.api.screen_status(),
@@ -336,7 +291,7 @@ async def _handle(hass: HomeAssistant, call: ServiceCall) -> None:
         if call.service == "screen_show":
             url = await resolve_source(coord.hass, source=d.get("source"), camera_entity=d.get("camera_entity"),
                                        media=d.get("media"), base=coord.ha_base)
-            await api.screen_show(url, d["loop"], d["after"], d["owner"], d.get("ttl"))
+            await api.screen_show(url, d["loop"], d["after"], d["owner"], d.get("ttl"), d.get("live"))
         elif call.service == "screen_text":
             await api.screen_text(d["title"], d["messages"], d["font_size"], d["after"], d["owner"],
                                   d.get("ttl"))
@@ -373,10 +328,6 @@ async def _handle(hass: HomeAssistant, call: ServiceCall) -> None:
             await api.screen_power(d["on"])
         elif call.service == "screen_sleep":
             await api.screen_sleep(d.get("seconds"), d.get("luminance"))
-        elif call.service == "speaker_play":
-            await api.speaker_play(d["source"], d["volume"])
-        elif call.service == "speaker_stop":
-            await api.speaker_stop()
     except DosenApiError as exc:
         raise HomeAssistantError(f"Dosen Pro: {exc}") from exc
     await coord.async_request_refresh()
@@ -385,7 +336,9 @@ async def _handle(hass: HomeAssistant, call: ServiceCall) -> None:
 #: Thực thể của các cài đặt hiển thị cũ (ô chọn, ô số, công tắc, văn bản): nay gom vào thẻ «Dosen Pro». Hậu tố mã nhận dạng để dọn khỏi sổ đăng ký.
 REMOVED_UNIQUE_SUFFIXES = ("-screen_brightness", "-screen_time", "-carousel-seconds", "-default_image", "-default_camera",
                            "-screen_quality", "-default_fit", "-default_screen", "-default_weather", "-default_rotate",
-                           "-show_chat", "-carousel", "-default_address")
+                           "-show_chat", "-carousel", "-default_address",
+                           # Assist đã bỏ (mic chỉ phục vụ cuộc gọi Zalo): vệ tinh, ô chọn pipeline/độ nhạy, mic, nút dừng loa
+                           "-satellite", "-pipeline", "-vad_sensitivity", "-mic_gain", "-mic_level", "-mute", "-btn-speaker_stop")
 
 
 @callback
@@ -450,6 +403,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coord.display.async_load()
     coord.carousel = Carousel(coord)
     await coord.carousel.async_load()
+    coord.zalo = ZaloCallScreen(coord)
+    coord.zalo.start()
+    entry.async_on_unload(coord.zalo.stop)
     if not entry.data.get(CONF_INTERCOM_KEY):          # chưa có khoá bộ đàm (mục mới / vừa cấu hình lại): sinh một khoá
         hass.config_entries.async_update_entry(entry, data={**entry.data, CONF_INTERCOM_KEY: secrets.token_urlsafe(24)})
     await _async_register_frontend(hass)

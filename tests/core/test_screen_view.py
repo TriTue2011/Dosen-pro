@@ -93,7 +93,7 @@ def test_rotation_applies_only_to_the_default_screen_not_to_event_layers(cfg):
         assert scr._view_of({"owner": "default", "mode": "clock"}) == (0, "contain")
         assert scr._view_of({"owner": "zalo_call", "mode": "video"}) == (0, "contain")       # sự kiện: nguyên trạng
         assert scr._view_of({"owner": "chuong", "mode": "live"}) == (0, "contain")
-        assert scr._view_of({"owner": "assist", "mode": "text"}) == (0, "contain")
+        assert scr._view_of({"owner": "zalo_call", "mode": "text"}) == (0, "contain")
     finally:
         scr.close()
 

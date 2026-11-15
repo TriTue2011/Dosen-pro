@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .audio import MicSession, TalkSession
+from .audio import TalkSession
 from .config import CamConfig
 from .dvrip import DVRIPClient, DVRIPError
 from .events import AlarmSession, other_record
@@ -14,7 +14,6 @@ class Camera:
     def __init__(self, cfg: CamConfig, now=None, on_alarm=None) -> None:
         self.cfg = cfg
         self.talk = TalkSession(cfg)
-        self.mic = MicSession(cfg)
         self.screen = Screen(cfg, now, (lambda src, op, data: on_alarm(other_record(src, op, data))) if on_alarm else None)
         self.speaker = Speaker(self.talk, self.screen, cfg.ffmpeg)
         self.events = AlarmSession(cfg, on_alarm)
@@ -109,7 +108,7 @@ class Camera:
         return self.get_audio()
 
     def close(self) -> None:
-        for part in (self.events, self.speaker, self.mic, self.talk):
+        for part in (self.events, self.speaker, self.talk):
             try:
                 part.stop()
             except Exception:                    # noqa: BLE001 — đóng hết dù một phần lỗi

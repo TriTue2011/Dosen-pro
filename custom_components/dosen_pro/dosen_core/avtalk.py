@@ -129,6 +129,7 @@ class AVTalkSession:
         self.control: DVRIPClient | None = None
         self.client: DVRIPClient | None = None        # the media link
         self._drain_stop = threading.Event()
+        self._opening: tuple = ()                      # hai kết nối đang mở dở (để ``abort`` đóng được)
 
     def _expect(self, client: DVRIPClient, reply_op: int, what: str) -> None:
         for _ in range(8):                 # skip unrelated chunks
@@ -143,6 +144,7 @@ class AVTalkSession:
     def open(self, width: int, height: int, fps: int) -> None:
         control = DVRIPClient(*self._args)
         media = DVRIPClient(*self._args)
+        self._opening = (control, media)
         try:
             control.connect()
             control.login(self._user, self._password)
@@ -172,11 +174,23 @@ class AVTalkSession:
             control.close()
             media.close()
             raise
+        finally:
+            self._opening = ()
         self.control, self.client = control, media
 
     def send(self, packet: bytes) -> None:
         assert self.client is not None
         self.client.write_cmd(OP_AVTALK_DATA, packet, seq=0)
+
+    def abort(self) -> None:
+        """Đóng thô mọi kết nối (kể cả đang mở dở) để luồng đang chờ mạng bị đánh thức bằng lỗi; dùng khi bộ canh giữ thấy kẹt."""
+        self._drain_stop.set()
+        for c in (self.client, self.control, *self._opening):
+            if c is not None:
+                try:
+                    c.close()
+                except Exception:                      # noqa: BLE001 — đang cứu, không để lỗi đóng chặn việc đóng các kết nối còn lại
+                    pass
 
     def close(self) -> None:
         self._drain_stop.set()
@@ -207,6 +221,8 @@ class AVTalkSender:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._need_key = True
+        self.live = False                    # nguồn trực tiếp: hàng đợi ngắn, chậm thì bỏ hết khung cũ nhảy tới khung khoá kế
+        self.live_dropped = 0
         self.running = False
         self.video_sent = 0
         self.key_sent = 0
@@ -222,7 +238,15 @@ class AVTalkSender:
                                         name="avtalk-sender")
         self._thread.start()
 
+    LIVE_MAX_QUEUE = 3                       # ≈ 0,3 s ở 10 fps: dồn quá mức này là đang tụt lại sau thời gian thật
+
+    def set_live(self, live: bool) -> None:
+        self.live = bool(live)
+
     def push(self, is_key: bool, au: bytes) -> None:
+        if self.live and self._q.qsize() >= self.LIVE_MAX_QUEUE:
+            self.live_dropped += 1
+            self.reset()                                # bỏ hết khung cũ, đợi khung khoá kế (≤ 1 s với nguồn trực tiếp)
         try:
             self._q.put_nowait((is_key, au))
         except queue.Full:
@@ -309,5 +333,5 @@ class AVTalkSender:
     def stats(self) -> dict:
         return {"video_packets": self.video_sent, "key_packets": self.key_sent,
                 "audio_packets": self.audio_sent, "bytes": self.bytes_sent,
-                "queue_overflows": self.queue_overflows,
+                "queue_overflows": self.queue_overflows, "live_dropped": self.live_dropped,
                 "queued": self._q.qsize(), "last_error": self.last_error}

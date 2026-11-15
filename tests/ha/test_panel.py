@@ -38,7 +38,7 @@ async def test_state_has_settings_cards_and_the_choices_the_card_offers(hass, ws
     assert r["success"]
     st = r["result"]
     assert st["settings"] == {"default_mode": None, "default_camera": "", "default_image": "", "default_text": "", "default_weather": "",
-                              "default_rotate": 0, "default_fit": "contain", "default_quality": "standard", "show_chat": True}
+                              "default_rotate": 0, "default_fit": "contain", "default_quality": "standard", "zalo_call_screen": True}
     assert st["carousel"]["seconds"] == 20.0 and st["carousel"]["cards"] == [] and st["carousel"]["on"] is False
     assert {"red", "green"} <= set(st["options"]["colors"]) and st["options"]["themes"] == ["light", "dark"]
     assert st["entry_id"] == _coord(hass).entry.entry_id
@@ -54,17 +54,17 @@ async def test_only_admins_may_use_the_card_api(hass, hass_ws_client, hass_read_
 
 async def test_display_settings_survive_a_restart(hass, hass_storage):
     entry = await _setup(hass, entry_id="eidset")
-    await _coord(hass).display.async_set({"default_mode": "clock", "default_rotate": 90, "default_quality": "high", "show_chat": False})
+    await _coord(hass).display.async_set({"default_mode": "clock", "default_rotate": 90, "default_quality": "high", "zalo_call_screen": False})
     await hass.async_block_till_done()
     await _coord(hass).display._store._async_handle_write_data() if hasattr(_coord(hass).display._store, "_async_handle_write_data") else None
     await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     saved = hass_storage["dosen_pro.eidset.display"]["data"]
-    assert saved["default_mode"] == "clock" and saved["default_rotate"] == 90 and saved["show_chat"] is False
+    assert saved["default_mode"] == "clock" and saved["default_rotate"] == 90 and saved["zalo_call_screen"] is False
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     c = _coord(hass)
-    assert (c.default_mode, c.default_rotate, c.default_quality, c.show_chat) == ("clock", 90, "high", False)
+    assert (c.default_mode, c.default_rotate, c.default_quality, c.zalo_call_screen) == ("clock", 90, "high", False)
 
 
 async def test_a_setting_the_camera_refuses_is_rolled_back(hass, ws, monkeypatch):
@@ -204,16 +204,16 @@ async def test_old_display_setting_entities_are_removed_from_the_registry_on_set
     entry.add_to_hass(hass)
     reg = er.async_get(hass)
     old = {"select": ["default_screen", "default_camera", "default_image", "default_weather", "default_rotate", "default_fit", "screen_quality"],
-           "text": ["default_address"], "number": ["screen_time", "screen_brightness", "carousel-seconds"],
-           "switch": ["show_chat", "carousel"]}
+           "text": ["default_address"], "number": ["screen_time", "screen_brightness", "carousel-seconds", "mic_gain"],
+           "switch": ["show_chat", "carousel", "mute"], "assist_satellite": ["satellite"], "button": ["btn-speaker_stop"]}
     for domain, suffixes in old.items():
         for suffix in suffixes:
             reg.async_get_or_create(domain, DOMAIN, f"{entry.entry_id}-{suffix}", config_entry=entry, suggested_object_id=f"dosen_pro_{suffix}")
-    keep = reg.async_get_or_create("switch", DOMAIN, f"{entry.entry_id}-mute", config_entry=entry, suggested_object_id="dosen_pro_tat_mic")
+    keep = reg.async_get_or_create("switch", DOMAIN, f"{entry.entry_id}-audio-anr", config_entry=entry, suggested_object_id="dosen_pro_chong_on")
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     left = {e.unique_id for e in er.async_entries_for_config_entry(reg, entry.entry_id)}
     for suffixes in old.values():
         for suffix in suffixes:
             assert f"{entry.entry_id}-{suffix}" not in left, suffix
-    assert keep.unique_id in left and f"{entry.entry_id}-pipeline" in left                  # thực thể còn dùng thì giữ
+    assert keep.unique_id in left                  # thực thể còn dùng thì giữ

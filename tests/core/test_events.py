@@ -206,26 +206,6 @@ def test_only_start_of_localalarm_counts_as_possible_press(cfg):
     assert flags == [True, False, True]
 
 
-def test_mic_stop_does_not_leave_a_traceback_in_the_reader_thread(fake_cam, cfg):
-    """Dừng mic đóng socket dưới chân luồng đọc: OSError «Bad file
-    descriptor» không được văng ra thành traceback (thấy trên cam thật)."""
-    import threading
-    from dosen_core.audio import MicSession
-    errors = []
-    old_hook = threading.excepthook
-    threading.excepthook = lambda args: errors.append(args.exc_value)
-    mic = MicSession(cfg)
-    try:
-        mic.start()
-        time.sleep(0.5)                  # để luồng đọc đang chờ gói
-        mic.stop()
-        time.sleep(0.3)
-    finally:
-        threading.excepthook = old_hook
-    assert errors == []
-    assert mic.last_error is None        # dừng chủ động, không phải lỗi cam
-
-
 
 
 def test_unsolicited_non_alarm_packets_become_opcode_events(cfg):

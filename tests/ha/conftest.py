@@ -12,9 +12,6 @@ except ImportError:
     sys.modules["turbojpeg"] = _m
 
 
-_REAL: dict = {}                       # hàm thật bị thay bằng bản giả trong test (vd. vòng nghe của vệ tinh)
-
-
 @pytest.fixture(autouse=True)
 def _enable(enable_custom_integrations):
     yield
@@ -22,20 +19,14 @@ def _enable(enable_custom_integrations):
 
 @pytest.fixture(autouse=True)
 def _fake_camera(monkeypatch):
-    """Camera giả thay cho lõi thật ở MỌI test tích hợp: không mở luồng/ffmpeg/pipeline thật."""
+    """Camera giả thay cho lõi thật ở MỌI test tích hợp: không mở luồng/ffmpeg thật."""
     import custom_components.dosen_pro as pkg
     import custom_components.dosen_pro.config_flow as cflow
-    from custom_components.dosen_pro import assist_satellite as sat_mod
     from fakes import FakeCamera
     FakeCamera.instances.clear()
     FakeCamera.login_error = None
     monkeypatch.setattr(pkg, "Camera", FakeCamera)
     monkeypatch.setattr(cflow, "Camera", FakeCamera)
-
-    async def _no_loop(self):
-        return
-    _REAL.setdefault("chay", sat_mod.DosenSatellite._chay)          # test cần vòng nghe thật thì lấy lại từ đây
-    monkeypatch.setattr(sat_mod.DosenSatellite, "_chay", _no_loop)
 
 
 @pytest.fixture(autouse=True)

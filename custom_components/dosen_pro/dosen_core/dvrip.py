@@ -115,6 +115,28 @@ def parse_alarm_info(payload: bytes) -> dict | None:
     return reply
 
 
+#: Mất nguồn camera KHÔNG gửi gói đóng kết nối: không có gì báo cho ta biết, dữ liệu cứ dồn vào bộ đệm gửi của hệ điều hành và kết nối
+#: «chết âm thầm» hàng chục phút (đo 15/11: rút nguồn cắm lại, màn không tự về). Nên mọi kết nối DVRIP đều bật keepalive TCP ngắn và hạn
+#: chờ ACK, để kết nối chết bị hệ điều hành đóng trong ~10 giây (lần gửi kế tiếp báo lỗi → phiên được mở lại). ``TCP_NODELAY`` để gói
+#: nhỏ (tiếng 40 ms, khung hình) đi ngay, không bị gom chờ.
+KEEPALIVE_IDLE_S, KEEPALIVE_INTERVAL_S, KEEPALIVE_COUNT, USER_TIMEOUT_MS = 5, 2, 3, 8000
+
+
+def tune_socket(sock: socket.socket) -> None:
+    for level, name, value in ((socket.SOL_SOCKET, "SO_KEEPALIVE", 1), (socket.IPPROTO_TCP, "TCP_NODELAY", 1),
+                               (socket.IPPROTO_TCP, "TCP_KEEPIDLE", KEEPALIVE_IDLE_S),
+                               (socket.IPPROTO_TCP, "TCP_KEEPINTVL", KEEPALIVE_INTERVAL_S),
+                               (socket.IPPROTO_TCP, "TCP_KEEPCNT", KEEPALIVE_COUNT),
+                               (socket.IPPROTO_TCP, "TCP_USER_TIMEOUT", USER_TIMEOUT_MS)):
+        opt = getattr(socket, name, None)
+        if opt is None:                                    # hệ điều hành không có (không phải Linux): bỏ qua
+            continue
+        try:
+            sock.setsockopt(level, opt, value)
+        except OSError:
+            pass
+
+
 class LoginGuard:
     """Protects the camera from a login storm. When the camera refuses a login (wrong password, account
     locked: Ret 203/204/205/206...), further logins are refused HERE, without touching the camera, for a
@@ -201,6 +223,7 @@ class DVRIPClient:
     def connect(self) -> None:
         self.sock = socket.create_connection(
             (self.host, self.port), timeout=self.connect_timeout)
+        tune_socket(self.sock)
         self.sock.settimeout(self.read_timeout)
         self.session = 0
         self.seq = 0

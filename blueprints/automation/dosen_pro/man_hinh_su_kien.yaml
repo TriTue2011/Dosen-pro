@@ -73,7 +73,7 @@ blueprint:
         number: {min: 0, max: 3600, unit_of_measurement: "s", mode: box}
     ten_lop:
       name: Tên lớp
-      description: "Cùng tên thì thay nhau; ví dụ «chuong_cua», «nguoi_la». Đừng dùng «assist» và «zalo_call» (dành cho Assist và cuộc gọi Zalo)."
+      description: "Cùng tên thì thay nhau; ví dụ «chuong_cua», «nguoi_la». Đừng dùng «zalo_call» và «zalo_call_video» (dành cho cuộc gọi Zalo)."
       default: "su_kien"
       selector:
         text: {}

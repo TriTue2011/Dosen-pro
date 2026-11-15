@@ -1,7 +1,7 @@
 """Cài đặt hiển thị của màn hình camera: MỘT chỗ lưu và áp dụng, do thẻ «Dosen Pro» (giao diện) điều khiển qua WebSocket.
 
 Trước đây mỗi cài đặt là một thực thể trên thiết bị (ô chọn, ô số, công tắc…). Nay gom vào đây: màn hình mặc định và nguồn của nó,
-thời tiết, xoay hình, kiểu khung, chất lượng, hiện hội thoại Assist. Lưu bằng ``Store`` nên khởi động lại HA vẫn giữ."""
+thời tiết, xoay hình, kiểu khung, chất lượng, hiện cuộc gọi Zalo. Lưu bằng ``Store`` nên khởi động lại HA vẫn giữ."""
 
 from __future__ import annotations
 
@@ -59,7 +59,7 @@ def _rotate(v):
 VALIDATORS = {
     "default_mode": _enum(DEFAULT_MODES), "default_camera": _entity_or_empty, "default_image": _entity_or_empty,
     "default_text": _text, "default_weather": _entity_or_empty, "default_rotate": _rotate, "default_fit": _enum(FITS),
-    "default_quality": _enum(QUALITIES), "show_chat": _bool,
+    "default_quality": _enum(QUALITIES), "zalo_call_screen": _bool,
 }
 _SOURCE_KEYS = {"default_mode", "default_camera", "default_image", "default_text"}
 

@@ -177,7 +177,8 @@
     _displayHtml() {
       const s = this._state.settings, sc = this._screen || {};
       return `<h3>Màn hình camera</h3><div id="screen-box">${this._screenInner(sc)}</div>
-        <div class="row"><label>Hiện hội thoại Assist</label><input type="checkbox" data-set="show_chat" ${s.show_chat ? "checked" : ""}></div>`;
+        <div class="row"><label>Hiện cuộc gọi Zalo</label><input type="checkbox" data-set="zalo_call_screen" ${s.zalo_call_screen ? "checked" : ""}>
+          <span class="hint">Tên người gọi, rồi hình video cuộc gọi lên màn.</span></div>`;
     }
     _screenInner(sc) {
       return `<div class="row"><label>Độ sáng</label><input type="number" id="scr-lum" min="1" max="100" value="${esc(sc.luminance ?? "")}"> %

@@ -17,7 +17,6 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities) -> N
         DosenButton(c, "screen_on", "Bật màn hình", lambda api: api.screen_power(True)),
         DosenButton(c, "screen_off", "Tắt màn hình", lambda api: api.screen_power(False)),
         DosenButton(c, "screen_default", "Về màn hình mặc định", lambda api: api.screen_off()),
-        DosenButton(c, "speaker_stop", "Dừng loa", lambda api: api.speaker_stop()),
     ])
 
 

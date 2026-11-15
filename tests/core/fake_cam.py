@@ -215,6 +215,8 @@ def main():
             os.remove(path)
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if os.environ.get("FAKE_RCVBUF"):                       # bộ đệm nhận nhỏ: camera «chết» (SIGSTOP) làm cửa sổ TCP đóng nhanh như camera mất nguồn thật
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, int(os.environ["FAKE_RCVBUF"]))
     srv.bind((HOST, PORT))
     srv.listen(8)
     print(f"fake DVRIP camera listening on {HOST}:{PORT}", flush=True)

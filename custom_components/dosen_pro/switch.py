@@ -1,49 +1,22 @@
-"""Công tắc: tắt mic, hiện hội thoại trên màn hình. (Bật/tắt nguồn màn hình là NÚT, xem button.py.)"""
+"""Công tắc: chống ồn mic camera, tiếng bíp khi nhấn nút (cài đặt thật của camera). Bật/tắt nguồn màn hình là NÚT, xem button.py."""
 
 from __future__ import annotations
 
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.const import EntityCategory, STATE_OFF, STATE_ON
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import DosenApiError
 from .const import DOMAIN, device_info
-from .entity import DosenEntity
 
 
 async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities) -> None:
     c = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([DosenMuteSwitch(c), DosenMicAnr(c), DosenKeyTip(c)])
-
-
-class DosenMuteSwitch(DosenEntity, SwitchEntity, RestoreEntity):
-    _attr_name = "Tắt mic"
-
-    def __init__(self, coordinator) -> None:
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{coordinator.entry.entry_id}-mute"
-
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        cu = await self.async_get_last_state()
-        self.coordinator.set_mic_muted(cu is not None and cu.state == STATE_ON)
-
-    @property
-    def is_on(self) -> bool:
-        return self.coordinator.mic_muted
-
-    async def async_turn_on(self, **kwargs: Any) -> None:
-        self.coordinator.set_mic_muted(True)
-        self.async_write_ha_state()
-
-    async def async_turn_off(self, **kwargs: Any) -> None:
-        self.coordinator.set_mic_muted(False)
-        self.async_write_ha_state()
+    async_add_entities([DosenMicAnr(c), DosenKeyTip(c)])
 
 
 

@@ -51,8 +51,9 @@ class LocalApi:
 
     # -- màn hình -----------------------------------------------------------
     async def screen_show(self, source: str, loop: bool = False, after: str = "off",
-                          owner: str = "automation", ttl: float | None = None) -> dict[str, Any]:
-        return await self._run(self.camera.screen.show, source, loop, after, owner, ttl)
+                          owner: str = "automation", ttl: float | None = None, live: bool | None = None) -> dict[str, Any]:
+        kw = {} if live is None else {"live": live}
+        return await self._run(self.camera.screen.show, source, loop, after, owner, ttl, **kw)
 
     async def screen_text(self, title: str, messages: list, font_size: int = 15, after: str = "hold",
                           owner: str = "automation", ttl: float | None = None) -> dict[str, Any]:
@@ -108,31 +109,12 @@ class LocalApi:
     async def speaker_play(self, source: str, volume: float = 1.0) -> dict[str, Any]:
         return await self._run(self.camera.speaker.play, source, volume)
 
-    async def speaker_play_bytes(self, audio: bytes, volume: float = 1.0) -> dict[str, Any]:
-        return await self._run(self.camera.speaker.play_bytes, audio, volume)
-
     async def speaker_open_stream(self):
         """Luồng tiếng trực tiếp (A-law 8 kHz) vào loa: đối tượng có ``feed(bytes)`` và ``close()``."""
         return await self._run(self.camera.speaker.open_stream)
 
     async def speaker_stop(self) -> dict[str, Any]:
         return await self._run(self.camera.speaker.stop)
-
-    # -- mic ----------------------------------------------------------------
-    async def mic_start(self) -> None:
-        if not self.camera.mic.running:
-            await self._run(self.camera.mic.start)
-
-    async def mic_read(self, timeout: float = 1.0) -> bytes | None:
-        """Khúc PCM16 8 kHz mono kế tiếp, hoặc None nếu chưa có / luồng đã đứt (xem ``mic_alive``)."""
-        return await asyncio.to_thread(self.camera.mic.read_chunk, timeout)
-
-    @property
-    def mic_alive(self) -> bool:
-        return self.camera.mic.running
-
-    async def mic_stop(self) -> None:
-        await asyncio.to_thread(self.camera.mic.stop)
 
     # -- báo động -----------------------------------------------------------
     async def events_start(self) -> None:

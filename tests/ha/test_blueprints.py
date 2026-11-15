@@ -27,7 +27,7 @@ async def _auto(hass, name, inputs, tmp_path):
     await hass.async_block_till_done()
 
 
-@pytest.mark.parametrize("name", ["man_hinh_su_kien.yaml", "man_hinh_cuoc_goi_zalo.yaml", "nut_goi_camera_zalo.yaml",
+@pytest.mark.parametrize("name", ["man_hinh_su_kien.yaml", "nut_goi_camera_zalo.yaml",
                                   "man_hinh_the_thong_tin.yaml"])
 def test_blueprints_load(name):
     bp = _bp(name)
@@ -66,23 +66,6 @@ async def test_event_blueprint_text_without_ttl(hass, tmp_path):
     await hass.async_block_till_done()
     assert texts[-1].data["title"] == "Cảnh báo" and texts[-1].data["owner"] == "su_kien"
     assert "ttl" not in texts[-1].data and texts[-1].data["messages"][0]["text"] == "Có người lạ ở cổng"
-
-
-async def test_zalo_blueprint_shows_call_then_releases(hass, tmp_path):
-    shows = async_mock_service(hass, "dosen_pro", "screen_show")
-    texts = async_mock_service(hass, "dosen_pro", "screen_text")
-    rels = async_mock_service(hass, "dosen_pro", "screen_release")
-    await _auto(hass, "man_hinh_cuoc_goi_zalo.yaml", {"video_url": "http://zalo:8090/api/call/video/view"}, tmp_path)
-    hass.bus.async_fire("zalo_call_call_state", {"state": "incoming", "peer": "Bà"})
-    await hass.async_block_till_done()
-    assert texts and texts[-1].data["owner"] == "zalo_call" and "Bà đang gọi đến" in texts[-1].data["messages"][0]["text"]
-    assert not shows                                            # chưa nghe máy: chỉ hiện chữ
-    hass.bus.async_fire("zalo_call_call_state", {"state": "answered", "peer": "Bà"})
-    await hass.async_block_till_done()
-    assert shows[-1].data == {"source": "http://zalo:8090/api/call/video/view", "owner": "zalo_call", "after": "hold"}
-    hass.bus.async_fire("zalo_call_call_state", {"state": "ended", "peer": "Bà"})
-    await hass.async_block_till_done()
-    assert rels[-1].data == {"owner": "zalo_call"}
 
 
 async def test_call_button_blueprint_answers_or_dials(hass, tmp_path):

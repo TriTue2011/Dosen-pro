@@ -313,3 +313,77 @@ def test_switching_source_really_stops_the_old_encoder_even_if_it_ignores_sigter
         scr.off()
         scr.close()
     assert _wait(lambda: olds[-1].poll() is not None, 10)                       # tắt màn thì bộ cuối cũng dừng, không để ma
+
+
+# -- mất nguồn camera: phát hiện chết âm thầm, bộ nền không chết, bộ canh giữ gỡ kẹt ----------------------------------
+
+def test_every_dvrip_socket_is_tuned_to_detect_a_dead_peer_in_seconds(fake_cam_avtalk, cfg):
+    """Rút nguồn camera không gửi gói đóng: phải có keepalive TCP ngắn + hạn chờ ACK, và NODELAY để gói nhỏ đi ngay."""
+    import socket
+    from dosen_core.dvrip import DVRIPClient, KEEPALIVE_IDLE_S, USER_TIMEOUT_MS
+    c = DVRIPClient(cfg.cam_ip, cfg.cam_port, 3, 3)
+    c.connect()
+    try:
+        s = c.sock
+        assert s.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE) == 1
+        assert s.getsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY) == 1
+        assert s.getsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE) == KEEPALIVE_IDLE_S
+        assert s.getsockopt(socket.IPPROTO_TCP, socket.TCP_USER_TIMEOUT) == USER_TIMEOUT_MS
+    finally:
+        c.close()
+
+
+def test_the_background_loop_survives_unexpected_errors_and_retries_fast(fake_cam_avtalk, cfg, monkeypatch):
+    """Lỗi loại lạ (không phải OSError/DVRIPError) từng làm vòng nền chết im lặng → màn không bao giờ tự về."""
+    import dosen_core.screen as sm
+    monkeypatch.setattr(sm, "RETRY_FIRST_S", 1.0)
+    scr = Screen(cfg)
+    real = scr._apply_locked
+    calls = {"n": 0}
+
+    def flaky():
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise ValueError("lỗi lạ")
+        return real()
+    monkeypatch.setattr(scr, "_apply_locked", flaky)
+    try:
+        scr.set_default("clock")
+    except ValueError:
+        pass                                                  # lần gọi trực tiếp đầu tiên ném ra cho người gọi (đúng)
+    scr.load()
+    try:
+        assert _wait(lambda: scr.status()["mode"] == "clock", 30)        # vòng nền tự thử lại và lên được
+        assert scr._ticker.is_alive() and scr.status()["last_error"] is None
+    finally:
+        scr.off()
+        scr.close()
+
+
+def test_watchdog_aborts_the_network_when_an_apply_is_stuck(fake_cam_avtalk, cfg, monkeypatch, caplog):
+    import threading
+    import dosen_core.screen as sm
+    monkeypatch.setattr(sm, "WATCHDOG_STUCK_S", 0.5)
+    monkeypatch.setattr(sm, "WATCHDOG_EVERY_S", 0.2)
+    scr = Screen(cfg)
+    release, entered = threading.Event(), threading.Event()
+    aborted = []
+    monkeypatch.setattr(scr, "_abort_network", lambda: (aborted.append(1), release.set()))
+
+    def stuck():
+        entered.set()
+        release.wait(20)                                       # giả lập chờ mạng không hạn
+        raise OSError("connection aborted")
+    monkeypatch.setattr(scr, "_apply_locked", stuck)
+    scr.load()
+    t = threading.Thread(target=lambda: scr.show_text("t", ["x"], owner="o"), daemon=True)
+    try:
+        t.start()
+        assert entered.wait(5)
+        assert _wait(lambda: aborted, 10)                      # canh giữ phát hiện kẹt và đóng thô kết nối
+        assert _wait(lambda: not t.is_alive(), 10)             # luồng kẹt được gỡ ra
+        assert scr.status()["aborts"] >= 1
+        assert any("kẹt" in r.getMessage() for r in caplog.records)     # có ghi ngăn xếp để biết đúng chỗ
+    finally:
+        release.set()
+        scr._stopping = True

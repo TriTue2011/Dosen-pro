@@ -18,8 +18,9 @@ class FakeScreen:
     def close(self):
         self.calls.append(("close",))
 
-    def show(self, source, loop, after, owner, ttl):
-        self.calls.append(("show", {"source": source, "loop": loop, "after": after, "owner": owner, "ttl": ttl}))
+    def show(self, source, loop, after, owner, ttl, live=None):
+        self.calls.append(("show", {"source": source, "loop": loop, "after": after, "owner": owner, "ttl": ttl,
+                                    **({"live": live} if live is not None else {})}))
         return self._status
 
     def show_text(self, title, messages, font_size, after, owner, ttl):
@@ -114,20 +115,6 @@ class FakeSpeaker:
         return self.status()
 
 
-class FakeMic:
-    def __init__(self):
-        self.running = False
-
-    def start(self):
-        self.running = True
-
-    def stop(self):
-        self.running = False
-
-    def read_chunk(self, timeout=1.0):
-        return None
-
-
 class FakeEvents:
     def __init__(self):
         self.running = False
@@ -147,7 +134,7 @@ class FakeCamera:
 
     def __init__(self, cfg, now=None, on_alarm=None):
         self.cfg, self.now, self.on_alarm = cfg, now, on_alarm
-        self.screen, self.speaker, self.mic, self.events = FakeScreen(), FakeSpeaker(), FakeMic(), FakeEvents()
+        self.screen, self.speaker, self.events = FakeScreen(), FakeSpeaker(), FakeEvents()
         self.closed = False
         self.audio = {"speaker": 50, "mic": 50, "anr": True, "key_tip": True}
         self.audio_calls = []

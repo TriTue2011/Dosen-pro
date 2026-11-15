@@ -1,7 +1,7 @@
 """Bộ đàm: Zalo Call (hay bất cứ ai) POST tiếng A-law 8 kHz theo thời gian thật vào đây, tiếng ra loa camera.
 
 Cùng khuôn với bộ đàm của loa R1 / dahua_talk để app Zalo dùng được: khoá riêng trong địa chỉ (``?k=``), một phiên
-một lúc. Trong lúc có cuộc gọi, vệ tinh Assist ngừng nghe để tiếng cuộc gọi không kích hoạt từ khoá đánh thức."""
+một lúc."""
 
 from __future__ import annotations
 

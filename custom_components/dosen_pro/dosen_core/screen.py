@@ -12,9 +12,11 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import threading
 import time
+import traceback
 from datetime import datetime
 
 from . import avtalk, render
@@ -27,6 +29,10 @@ _IMAGE_EXT = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
 _DEFAULT_MODES = ("off", "clock", "image", "video", "live")
 
 
+#: Bộ canh giữ: một lần ``_apply`` (mở phiên, khởi động ffmpeg…) kéo dài quá ngần này giây coi như KẸT → ghi ngăn xếp luồng và đóng thô kết nối.
+WATCHDOG_STUCK_S = 25.0
+WATCHDOG_EVERY_S = 3.0
+RETRY_FIRST_S, RETRY_MAX_S = 3.0, 30.0                 # lần thử lại sau lỗi: 3 s rồi gấp đôi tới 30 s (cắm lại nguồn là lên nhanh)
 CAROUSEL_OWNER = "carousel"              # lớp của màn luân phiên: luôn nằm dưới các lớp sự kiện khác
 ROTATIONS = (0, 90, 180, 270)            # độ xoay hình theo chiều kim đồng hồ
 FITS = ("contain", "cover")              # contain = vừa khung (có viền đen); cover = lấp đầy màn (cắt rìa)
@@ -63,18 +69,33 @@ def check_quality(quality) -> None:
         raise ValueError("quality must be one of " + ", ".join(QUALITIES))
 
 
+LIVE_GOP_SECONDS = 1                      # nguồn trực tiếp: khung khoá mỗi 1 s để bỏ khung cũ rồi nhảy tới hình mới nhanh (≤ 1 s)
+
+
+def is_live_source(source: str) -> bool:
+    """Nguồn chạy theo thời gian thật (camera RTSP, luồng MJPEG/HTTP trực tiếp): hiện càng gần «bây giờ» càng tốt, không giả lập tốc độ."""
+    low = source.lower().split("?")[0]
+    return low.startswith("rtsp://") or low.startswith("rtsps://") or low.endswith((".mjpg", ".mjpeg", "/video/view", "/mjpeg", "/stream.mjpg"))
+
+
 def build_hevc_cmd(source: str, width: int, height: int, fps: int,
                    loop: bool = False, ffmpeg: str = "ffmpeg", rotate: int = 0, fit: str = "contain",
-                   quality: str = "standard") -> list[str]:
+                   quality: str = "standard", live: bool | None = None) -> list[str]:
     """ffmpeg command: any source -> rotated, fitted H.265 Annex-B on stdout (xem ``_QUALITY`` về các mức chất lượng)."""
     check_view(rotate, fit)
     check_quality(quality)
     q = _QUALITY[quality]
     cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin"]
     image = source.lower().split("?")[0].endswith(_IMAGE_EXT)
+    live = is_live_source(source) if live is None else live
     if source.startswith("rtsp://"):
         cmd += ["-rtsp_transport", "tcp", "-timeout", "5000000"]
-    else:
+    if live:
+        # Nguồn trực tiếp: không «-re» (không tự làm chậm), không đệm đầu vào, dò luồng tối thiểu → hình lên sớm và không tụt lại sau thời gian thật.
+        cmd += ["-fflags", "nobuffer+discardcorrupt", "-flags", "low_delay", "-probesize", "32768", "-analyzeduration", "0"]
+        if not source.startswith("rtsp://"):
+            cmd += ["-use_wallclock_as_timestamps", "1"]     # MJPEG qua HTTP không có dấu thời gian: dùng giờ nhận
+    elif not source.startswith("rtsp://"):
         cmd += ["-re"]
         if image:
             cmd += ["-loop", "1", "-framerate", str(fps)]
@@ -83,7 +104,7 @@ def build_hevc_cmd(source: str, width: int, height: int, fps: int,
     if source.startswith("lavfi:"):
         cmd += ["-f", "lavfi"]
         source = source[len("lavfi:"):]
-    gop = fps * q["gop_seconds"]
+    gop = fps * (LIVE_GOP_SECONDS if live else q["gop_seconds"])
     if fit == "cover":
         fit_vf = f"scale={width}:{height}:force_original_aspect_ratio=increase:flags=lanczos,crop={width}:{height}"
     else:
@@ -128,6 +149,11 @@ class Screen:
         self._clock_sig: tuple | None = None          # (phút, thời tiết) của lần vẽ đồng hồ gần nhất
         self.weather: dict | None = None              # thời tiết hiện trên đồng hồ (HA đẩy xuống), None = không có
         self._ticker: threading.Thread | None = None
+        self._watchdog: threading.Thread | None = None
+        self._busy: tuple[int, float] | None = None     # (luồng, lúc bắt đầu) của lần _apply đang chạy
+        self._opening_session: avtalk.AVTalkSession | None = None
+        self._negotiating: DVRIPClient | None = None
+        self.aborts = 0
         self._stopping = False
 
     # -- session ---------------------------------------------------------
@@ -136,6 +162,7 @@ class Screen:
         client = DVRIPClient(self.cfg.cam_ip, self.cfg.cam_port,
                              self.cfg.dvrip_connect_timeout,
                              self.cfg.dvrip_read_timeout)
+        self._negotiating = client
         try:
             client.connect()
             client.login(self.cfg.cam_user, self.cfg.cam_pass)
@@ -143,6 +170,7 @@ class Screen:
         except (OSError, DVRIPError):
             return
         finally:
+            self._negotiating = None
             client.close()
         if got["negotiated"] and got["codec"] == "H265":
             self.width, self.height, self.fps = (
@@ -161,7 +189,11 @@ class Screen:
             self.cfg.cam_ip, self.cfg.cam_port, self.cfg.cam_user,
             self.cfg.cam_pass, self.cfg.dvrip_connect_timeout,
             self.cfg.dvrip_read_timeout, self._on_other)
-        session.open(self.width, self.height, self.fps)
+        self._opening_session = session
+        try:
+            session.open(self.width, self.height, self.fps)
+        finally:
+            self._opening_session = None
         if self.cfg.screen_auto_wake and session.control is not None:
             # The LCD ignores video while it sleeps: switch it on, like the app's "Bật" button.
             try:
@@ -261,6 +293,8 @@ class Screen:
         if self._ticker is None:
             self._ticker = threading.Thread(target=self._tick, daemon=True, name="screen-tick")
             self._ticker.start()
+            self._watchdog = threading.Thread(target=self._watch, daemon=True, name="screen-watch")
+            self._watchdog.start()
 
     def close(self) -> None:
         """Stop everything: end every layer, drop the default and close the AVTalk session."""
@@ -316,41 +350,50 @@ class Screen:
     def _apply(self) -> None:
         """Make the encoder show the top layer (or the default); close the session if nothing is left."""
         with self._lock:
-            layer = self._layers[-1] if self._layers else self._default_layer()
-            if layer is None:
-                self._stop_encoder()
-                self._close_session()
-                self._cur_key, self._cur_layer = None, None
-                self.mode, self.source = "off", ""
-                return
-            rotate, fit = self._view_of(layer)
-            key = (layer["owner"], layer["source"], layer["loop"], layer["mode"], rotate, fit, self.quality)
-            if self._sender is not None and not self._sender.running:
-                self._cur_key = None                  # the AVTalk session died: reopen below
-            if key == self._cur_key and (self._proc is not None or layer.get("ended")):
-                return
-            self._ensure_open()
-            self._stop_encoder()
-            assert self._sender is not None
-            self._sender.reset()
-            cmd = build_hevc_cmd(layer["source"], self.width, self.height, self.fps, layer["loop"], self.cfg.ffmpeg,
-                                 rotate, fit, self.quality)
+            self._busy = (threading.get_ident(), time.monotonic())
             try:
-                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            except OSError as exc:
-                raise RuntimeError(f"failed to start ffmpeg: {exc}") from exc
-            layer["ended"] = False
-            self._proc, self._cur_key, self._cur_layer = proc, key, layer
-            self.mode, self.source = layer["mode"], layer["source"]
-            self.last_error = None
-            self.switches += 1
-            threading.Thread(target=self._pump, args=(proc, self._token), daemon=True,
-                             name="screen-pump").start()
-            log.info("man hinh: hien %s (%s) lop=%s con %d lop", layer["mode"],
-                     redact_source(layer["source"]), layer["owner"], len(self._layers))
+                self._apply_locked()
+            finally:
+                self._busy = None
+
+    def _apply_locked(self) -> None:
+        layer = self._layers[-1] if self._layers else self._default_layer()
+        if layer is None:
+            self._stop_encoder()
+            self._close_session()
+            self._cur_key, self._cur_layer = None, None
+            self.mode, self.source = "off", ""
+            return
+        rotate, fit = self._view_of(layer)
+        key = (layer["owner"], layer["source"], layer["loop"], layer["mode"], rotate, fit, self.quality, layer.get("live"))
+        if self._sender is not None and not self._sender.running:
+            self._cur_key = None                  # the AVTalk session died: reopen below
+        if key == self._cur_key and (self._proc is not None or layer.get("ended")):
+            return
+        self._ensure_open()
+        self._stop_encoder()
+        assert self._sender is not None
+        self._sender.reset()
+        live = is_live_source(layer["source"]) if layer.get("live") is None else bool(layer["live"])
+        self._sender.set_live(live)                               # nguồn trực tiếp: bộ gửi bỏ khung cũ khi chậm
+        cmd = build_hevc_cmd(layer["source"], self.width, self.height, self.fps, layer["loop"], self.cfg.ffmpeg,
+                             rotate, fit, self.quality, live)
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except OSError as exc:
+            raise RuntimeError(f"failed to start ffmpeg: {exc}") from exc
+        layer["ended"] = False
+        self._proc, self._cur_key, self._cur_layer = proc, key, layer
+        self.mode, self.source = layer["mode"], layer["source"]
+        self.last_error = None
+        self.switches += 1
+        threading.Thread(target=self._pump, args=(proc, self._token), daemon=True,
+                         name="screen-pump").start()
+        log.info("man hinh: hien %s (%s) lop=%s con %d lop", layer["mode"],
+                 redact_source(layer["source"]), layer["owner"], len(self._layers))
 
     def show(self, source: str, loop: bool = False, after: str = "off", owner: str = "api",
-             ttl: float | None = None, mode: str | None = None) -> dict:
+             ttl: float | None = None, mode: str | None = None, live: bool | None = None) -> dict:
         """Push an event layer showing ``source`` (file, URL, rtsp://, image, lavfi:...).
 
         The newest layer is displayed. A layer ends when its source ends (``after="off"``), when
@@ -365,7 +408,7 @@ class Screen:
             raise ValueError("owner must be a short non-empty string")
         with self._lock:
             self._layers = [l for l in self._layers if l["owner"] != owner]
-            layer = {"owner": owner, "source": source, "loop": bool(loop), "after": after,
+            layer = {"owner": owner, "source": source, "loop": bool(loop), "after": after, "live": live,
                      "mode": mode or self._kind(source),
                      "deadline": time.monotonic() + ttl if ttl else None}
             if owner == CAROUSEL_OWNER:
@@ -552,8 +595,9 @@ class Screen:
     def _tick(self) -> None:
         """Once a second: expire layers by ttl; keep the screen alive (apply the default at startup,
         reopen a dropped session, refresh the clock each minute, retry a dropped live camera).
-        A failure backs off 30 s so a missing or locked camera is not hammered with logins."""
-        backoff_until = 0.0
+        Sau lỗi thử lại sau 3 s rồi gấp đôi tới 30 s (camera vừa cắm lại nguồn lên nhanh, camera thiếu/khoá không bị dồn đăng nhập).
+        BẮT MỌI LỖI: bộ nền này mà chết im lặng thì màn hình không bao giờ tự về (đã gặp 15/11)."""
+        backoff_until, backoff = 0.0, RETRY_FIRST_S
         while not self._stopping:
             time.sleep(1.0)
             now = time.monotonic()
@@ -580,10 +624,38 @@ class Screen:
                             and self._proc is None and now >= self._retry_at:
                         self._cur_key = None
                         self._apply()
+                    backoff = RETRY_FIRST_S                      # chạy được: lần lỗi sau lại bắt đầu từ 3 s
                 except (OSError, DVRIPError, RuntimeError) as exc:
                     self.last_error = f"man hinh: {exc}"
-                    log.warning("man hinh: %s; thu lai sau 30 giay", exc)
-                    backoff_until = now + 30
+                    log.warning("man hinh: %s; thu lai sau %.0f giay", exc, backoff)
+                    backoff_until, backoff = now + backoff, min(backoff * 2, RETRY_MAX_S)
+                except Exception:                                # noqa: BLE001 — không bao giờ để bộ nền chết
+                    self.last_error = "man hinh: loi bat ngo (xem nhat ky)"
+                    log.exception("man hinh: loi bat ngo trong vong nen; thu lai sau %.0f giay", backoff)
+                    backoff_until, backoff = now + backoff, min(backoff * 2, RETRY_MAX_S)
+
+    def _watch(self) -> None:
+        """Bộ canh giữ: một lần ``_apply`` quá ``WATCHDOG_STUCK_S`` giây là KẸT (kết nối nửa chết, chờ mạng không hạn…). Ghi ngăn xếp luồng
+        kẹt vào nhật ký (để biết đúng chỗ) và đóng thô mọi kết nối: luồng đang chờ nhận lỗi, bỏ ``_apply`` và vòng nền thử lại."""
+        while not self._stopping:
+            time.sleep(WATCHDOG_EVERY_S)
+            busy = self._busy
+            if busy is None or time.monotonic() - busy[1] < WATCHDOG_STUCK_S:
+                continue
+            frame = sys._current_frames().get(busy[0])
+            stack = "".join(traceback.format_stack(frame)) if frame is not None else "(không lấy được ngăn xếp)"
+            log.warning("man hinh: _apply kẹt %.0f giây; ngăn xếp luồng:\n%s; đóng thô kết nối", time.monotonic() - busy[1], stack)
+            self.aborts += 1
+            self._abort_network()
+            self._busy = (busy[0], time.monotonic())             # cho luồng thời gian thoát ra trước khi canh tiếp
+
+    def _abort_network(self) -> None:
+        """Đóng thô các kết nối (đang mở dở, đang chạy) để mọi chỗ chờ mạng nhận lỗi ngay."""
+        for target in (self._opening_session, self._session):
+            if target is not None:
+                target.abort()
+        if self._negotiating is not None:
+            self._negotiating.close()
 
     def status(self) -> dict:
         s = self._sender
@@ -592,7 +664,7 @@ class Screen:
                 "open": bool(s and s.running),
                 "source": redact_source(self.source) if self.mode not in ("text", "clock") else self.mode,
                 "default": dict(self.default, source=redact_source(self.default["source"])),
-                "view": dict(self.view), "quality": self.quality, "weather": dict(self.weather) if self.weather else None,
+                "view": dict(self.view), "quality": self.quality, "aborts": self.aborts, "weather": dict(self.weather) if self.weather else None,
                 "layers": [{"owner": l["owner"], "mode": l["mode"],
                             "source": redact_source(l["source"]) if l["mode"] not in ("text", "clock") else l["mode"],
                             "after": l["after"],
