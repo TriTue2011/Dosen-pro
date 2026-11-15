@@ -445,8 +445,8 @@ class Screen:
             return
         rotate, fit = self._view_of(layer)
         key = (layer["owner"], layer["source"], layer["loop"], layer["mode"], rotate, fit, self.quality, layer.get("live"))
-        if self._sender is not None and not self._sender.running:
-            self._cur_key = None                  # the AVTalk session died: reopen below
+        if self._sender is None or not self._sender.running:
+            self._cur_key = None                  # the AVTalk session died or was closed by a failed reopen: open it again below
         if key == self._cur_key and (self._proc is not None or layer.get("ended")):
             return
         self._ensure_open()
@@ -652,32 +652,43 @@ class Screen:
 
     def _pump(self, proc: subprocess.Popen, token: int) -> None:
         splitter = avtalk.HevcSplitter()
+        ended = True
         try:
             while True:
                 chunk = proc.stdout.read1(65536)
                 if not chunk:
                     break
                 if token != self._token:
-                    return                          # superseded by a newer source
+                    ended = False                   # superseded by a newer source: ``_stop_encoder`` is already reaping this ffmpeg
+                    return
                 sender = self._sender
                 if sender is None:
-                    return
+                    continue                        # chưa/không còn phiên tới camera (vừa mất điện): bỏ khung nhưng VẪN đọc, ffmpeg không bị nghẽn ống
                 for is_key, au in splitter.feed(chunk):
                     sender.push(is_key, au)
         finally:
-            self._pump_finished(proc, token)
+            if ended:
+                self._pump_finished(proc, token)
 
 
     def _pump_finished(self, proc, token: int) -> None:
-        """Dọn sau khi luồng đọc kết thúc. Tách riêng (không để ``return`` trong ``finally``: Python 3.14 cảnh báo)."""
+        """Dọn sau khi ffmpeg KẾT THÚC. Tách riêng (không để ``return`` trong ``finally``: Python 3.14 cảnh báo).
+
+        Chờ tiến trình thoát và đọc stderr NGOÀI khoá: trước đây ``proc.stderr.read()`` nằm trong khoá, mà luồng đọc thoát sớm khi mất phiên
+        trong lúc ffmpeg vẫn sống → đọc chặn mãi, mọi ``show``/``_tick`` chờ khoá mãi (rút nguồn camera rồi automation không chiếu được, 15/11)."""
+        err = b""
+        try:
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=5)
+            err = proc.stderr.read() or b""
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            pass
         with self._lock:
             if token != self._token:
                 return
-            err = b""
-            try:
-                err = proc.stderr.read() or b""
-            except (OSError, ValueError):
-                pass
             if err.strip():
                 self.last_error = redact_source(err.decode("utf-8", "replace").strip())
                 log.warning("man hinh: ffmpeg: %s", self.last_error)
