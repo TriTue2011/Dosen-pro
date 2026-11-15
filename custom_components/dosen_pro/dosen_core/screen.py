@@ -40,14 +40,20 @@ def check_view(rotate, fit) -> None:
         raise ValueError("fit must be 'contain' or 'cover'")
 
 
-#: Mức chất lượng mã hoá. «standard» GIỮ NGUYÊN bộ mã hoá đã chạy tốt trên camera này (x265 ultrafast: khối tối đa 32, không SAO).
-#: «high» chỉ đổi tốc độ bit (cùng công cụ nên chip giải mã của camera vẫn đọc được). «max» đổi cả preset sang slow (khối 64,
-#: SAO, rdoq…) — ĐẸP NHẤT nhưng chip giải mã của camera có thể không đọc được (đo 15/11: màn bật rồi đen) nên chỉ để thử.
+#: Mỗi KHUNG HÌNH phải nhỏ: camera chỉ nhận gói media tới cỡ vài KB. App iCSee thật không bao giờ gửi khung nào lớn hơn 5,8 KB và
+#: không chia nhỏ khung (đo trên bản chụp mạng); camera này vẫn hiện tới khoảng 8,4 KB nhưng ĐEN từ khoảng 9,7 KB trở lên (đo 15/11:
+#: đồng hồ khung khoá 19,8 KB và mức «Cao» cũ 9,6–13 KB đều đen; chữ 4–5 KB và live 6–8 KB hiện tốt). Muốn khung nhỏ phải giữ CẢ tốc độ bit
+#: tối đa thấp (400 kbps) lẫn bộ đệm VBV nhỏ (~40–48 kbit): tăng tốc độ bit lên 1500 làm khung phình tới 13–28 KB (đo). Nên các mức chất
+#: lượng chỉ khác nhau ở crf/preset, không khác ở tốc độ bit. Ảnh đứng yên thì khung khoá đầu hơi mờ rồi các khung sau tự làm nét.
+#:
+#: «standard»: x265 ultrafast (khối tối đa 32, không SAO) như bộ đã chạy tốt trên camera. «high»: cùng công cụ, crf 20 (chi tiết hơn khi
+#: có chuyển động). «max»: preset slow (khối 64, SAO, rdoq…) crf 18 — đẹp nhất nhưng chip giải mã của camera có thể không đọc được
+#: (chưa kiểm trên camera thật) nên chỉ để thử. Test đo kích thước từng khung cho cả ba mức (≤ 8000 B).
 QUALITIES = ("standard", "high", "max")
 _QUALITY = {
-    "standard": {"preset": "ultrafast", "crf": None, "vbv": 400, "gop_seconds": 4},
-    "high": {"preset": "ultrafast", "crf": 18, "vbv": 1500, "gop_seconds": 4},
-    "max": {"preset": "slow", "crf": 14, "vbv": 3000, "gop_seconds": 2},
+    "standard": {"preset": "ultrafast", "crf": None, "vbv": 400, "buf": 48, "gop_seconds": 4},
+    "high": {"preset": "ultrafast", "crf": 20, "vbv": 400, "buf": 48, "gop_seconds": 4},
+    "max": {"preset": "slow", "crf": 18, "vbv": 400, "buf": 40, "gop_seconds": 4},
 }
 
 
@@ -84,7 +90,7 @@ def build_hevc_cmd(source: str, width: int, height: int, fps: int,
                   f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2")
     params = (("crf=%d:" % q["crf"]) if q["crf"] else "") + (
         f"keyint={gop}:min-keyint={gop}:scenecut=0:bframes=0:slices=1:repeat-headers=1:aud=0:log-level=none:"
-        f"vbv-maxrate={q['vbv']}:vbv-bufsize={q['vbv']}")
+        f"vbv-maxrate={q['vbv']}:vbv-bufsize={q['buf']}")
     cmd += ["-i", source, "-an",
             "-vf", f"{_ROTATE_FILTER[rotate]}{fit_vf},fps={fps}",
             "-pix_fmt", "yuv420p", "-c:v", "libx265", "-preset", q["preset"],

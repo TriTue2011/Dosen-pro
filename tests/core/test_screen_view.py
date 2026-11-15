@@ -102,20 +102,22 @@ def _params(cmd):
     return cmd[cmd.index("-x265-params") + 1]
 
 
-def test_standard_quality_is_exactly_the_encoder_that_worked_on_the_camera():
-    """Mặc định PHẢI là bộ mã hoá đã chạy tốt: ultrafast, không crf, vbv 400, khung khoá 4 s (đổi là camera đen)."""
+def test_standard_quality_uses_the_ultrafast_tools_and_a_small_frame_budget():
+    """Mặc định: x265 ultrafast như bộ đã chạy tốt, GOP 4 s, bộ đệm VBV nhỏ để mỗi khung ≤ ~7,5 KB (camera đen với khung ≥ ~9,7 KB)."""
     cmd = build_hevc_cmd(_RED_BLUE, W, H, FPS)
     assert cmd[cmd.index("-preset") + 1] == "ultrafast"
     assert _params(cmd) == ("keyint=40:min-keyint=40:scenecut=0:bframes=0:slices=1:repeat-headers=1:aud=0:log-level=none:"
-                            "vbv-maxrate=400:vbv-bufsize=400")
+                            "vbv-maxrate=400:vbv-bufsize=48")
     assert "flags=lanczos" in cmd[cmd.index("-vf") + 1]
 
 
-def test_higher_qualities_raise_the_bitrate_and_only_max_changes_the_preset():
+def test_higher_qualities_lower_crf_but_never_raise_the_bitrate_cap():
+    """Tăng tốc độ bit tối đa làm khung phình to → camera đen. Các mức chỉ khác crf/preset; tốc độ bit tối đa luôn 400."""
     high, mx = build_hevc_cmd(_RED_BLUE, W, H, FPS, quality="high"), build_hevc_cmd(_RED_BLUE, W, H, FPS, quality="max")
     assert high[high.index("-preset") + 1] == "ultrafast"             # cùng công cụ mã hoá → chip giải mã camera đọc được
-    assert "crf=18" in _params(high) and "vbv-maxrate=1500" in _params(high)
-    assert mx[mx.index("-preset") + 1] == "slow" and "crf=14" in _params(mx) and "vbv-maxrate=3000" in _params(mx)
+    assert "crf=20" in _params(high) and "vbv-maxrate=400" in _params(high) and "vbv-bufsize=48" in _params(high)
+    assert mx[mx.index("-preset") + 1] == "slow" and "crf=18" in _params(mx) and "vbv-maxrate=400" in _params(mx)
+    assert "vbv-bufsize=40" in _params(mx)
     with pytest.raises(ValueError):
         build_hevc_cmd(_RED_BLUE, W, H, FPS, quality="ultra")
 
@@ -131,3 +133,25 @@ def test_quality_setting_reencodes_and_is_validated(cfg):
         assert scr.status()["quality"] == "max"
     finally:
         scr.close()
+
+
+@needs_x265
+@pytest.mark.parametrize("quality", ["standard", "high", "max"])
+@pytest.mark.parametrize("kind", ["clock", "motion"])
+def test_no_frame_is_big_enough_to_blank_the_camera_screen(quality, kind, tmp_path):
+    """Lỗi đo trên camera thật: khung ≥ ~9,7 KB (đồng hồ 20 KB, mức «Cao» 10–13 KB) làm màn đen. Đo kích thước TỪNG khung thật."""
+    from datetime import datetime
+    from dosen_core import avtalk
+    from dosen_core.render import render_clock
+    if kind == "clock":
+        png = tmp_path / "clock.png"
+        png.write_bytes(render_clock(datetime(2026, 11, 15, 13, 37), {"condition": "partlycloudy", "temp": 28, "humidity": 70,
+                                                                      "high": 31, "low": 23}))
+        src = str(png)
+    else:
+        src = "lavfi:testsrc2=size=800x448:rate=10"                           # nhiều chi tiết chuyển động
+    out = subprocess.run(["timeout", "5"] + build_hevc_cmd(src, W, H, FPS, quality=quality), capture_output=True).stdout
+    aus = list(avtalk.HevcSplitter().feed(out))
+    assert len(aus) >= 20
+    biggest = max(len(au) for _, au in aus)
+    assert biggest <= 8000, f"khung lớn nhất {biggest} B (camera đen từ ~9,7 KB)"
