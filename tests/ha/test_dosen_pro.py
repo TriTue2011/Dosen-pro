@@ -511,6 +511,12 @@ async def test_default_screen_is_retried_until_its_camera_exists(hass, monkeypat
         def __init__(self, fail_times):
             self.n, self.fail = 0, fail_times
 
+        def track_weather(self):
+            pass
+
+        async def push_weather(self):
+            pass
+
         async def apply_default(self):
             self.n += 1
             if self.n <= self.fail:
@@ -537,3 +543,39 @@ async def test_button_beep_switch_reads_and_writes_the_camera_setting(hass):
     assert cam.audio_calls[-1] == {"speaker": None, "mic": None, "anr": None, "key_tip": False}
     assert hass.states.get("switch.dosen_pro_tieng_bip_khi_nhan_nut").state == "off"
     assert hass.states.get("switch.dosen_pro_chong_on_mic_camera").state == "on"       # công tắc khác không bị đụng
+
+
+async def test_weather_entity_feeds_the_clock_with_temperature_humidity_and_forecast_range(hass):
+    from homeassistant.core import SupportsResponse
+
+    async def forecasts(call):
+        return {"weather.nha": {"forecast": [{"temperature": 91.4, "templow": 73.4}]}}           # °F
+    hass.services.async_register("weather", "get_forecasts", forecasts, supports_response=SupportsResponse.ONLY)
+    await _setup(hass)
+    cam = _cam()
+    hass.states.async_set("weather.nha", "partlycloudy", {"temperature": 82.4, "temperature_unit": "°F", "humidity": 70})
+    await hass.async_block_till_done()
+    assert "weather.nha" in hass.states.get("select.dosen_pro_thoi_tiet_tren_dong_ho").attributes["options"]
+    await hass.services.async_call("select", "select_option", {"entity_id": "select.dosen_pro_thoi_tiet_tren_dong_ho",
+                                                               "option": "weather.nha"}, blocking=True)
+    w = [c[1] for c in cam.screen.calls if c[0] == "weather"][-1]
+    assert w == {"condition": "partlycloudy", "temp": 28.0, "humidity": 70, "high": 33.0, "low": 23.0}   # °F → °C
+    hass.states.async_set("weather.nha", "rainy", {"temperature": 75.2, "temperature_unit": "°F", "humidity": 88})
+    await hass.async_block_till_done()
+    for _ in range(40):                                                          # đổi trạng thái → tự đẩy lại
+        if [c[1] for c in cam.screen.calls if c[0] == "weather"][-1]["condition"] == "rainy":
+            break
+        await asyncio.sleep(0.05)
+    assert [c[1] for c in cam.screen.calls if c[0] == "weather"][-1]["condition"] == "rainy"
+    await hass.services.async_call("select", "select_option", {"entity_id": "select.dosen_pro_thoi_tiet_tren_dong_ho",
+                                                               "option": "—"}, blocking=True)
+    assert [c[1] for c in cam.screen.calls if c[0] == "weather"][-1] is None              # bỏ chọn → đồng hồ không còn thời tiết
+
+
+async def test_weather_without_forecast_service_still_shows_current_conditions(hass):
+    await _setup(hass)                                                          # không đăng ký weather.get_forecasts
+    hass.states.async_set("weather.nha", "sunny", {"temperature": 30, "temperature_unit": "°C"})
+    await hass.services.async_call("select", "select_option", {"entity_id": "select.dosen_pro_thoi_tiet_tren_dong_ho",
+                                                               "option": "weather.nha"}, blocking=True)
+    w = [c[1] for c in _cam().screen.calls if c[0] == "weather"][-1]
+    assert w["condition"] == "sunny" and w["temp"] == 30.0 and w["high"] is None and w["low"] is None

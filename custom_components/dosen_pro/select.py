@@ -18,7 +18,8 @@ from .entity import DosenEntity
 async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities) -> None:
     c = hass.data[DOMAIN][entry.entry_id]
     async_add_entities([DosenPipelineSelect(hass, c), DosenVadSelect(hass, c), DosenDefaultScreen(c),
-                        DosenDefaultCamera(c), DosenDefaultImage(c), DosenDefaultRotate(c), DosenDefaultFit(c)])
+                        DosenDefaultCamera(c), DosenDefaultImage(c), DosenDefaultWeather(c), DosenDefaultRotate(c),
+                        DosenDefaultFit(c)])
 
 
 class DosenPipelineSelect(DosenEntity, AssistPipelineSelect):
@@ -126,6 +127,27 @@ class DosenDefaultImage(_SourcePicker):
 
     def __init__(self, coordinator) -> None:
         super().__init__(coordinator, "default_image", "Ảnh mặc định")
+
+
+class DosenDefaultWeather(_SourcePicker):
+    """Thực thể thời tiết hiện trên đồng hồ (chọn theo danh sách ``weather.*`` của HA)."""
+
+    _domain, _field, _modes = "weather", "default_weather", ()
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "default_weather", "Thời tiết trên đồng hồ")
+
+    async def async_select_option(self, option: str) -> None:
+        before = self.coordinator.default_weather
+        self.coordinator.default_weather = "" if option == NONE_OPTION else option
+        self.coordinator.track_weather()
+        try:
+            await self.coordinator.push_weather()
+        except HomeAssistantError:
+            self.coordinator.default_weather = before
+            self.coordinator.track_weather()
+            raise
+        self.async_write_ha_state()
 
 
 class _ViewSelect(_RestoreSelect):

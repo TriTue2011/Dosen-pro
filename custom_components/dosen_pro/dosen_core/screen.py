@@ -100,7 +100,8 @@ class Screen:
         self._cur_key: tuple | None = None
         self._cur_layer: dict | None = None
         self._retry_at = 0.0
-        self._clock_minute = ""
+        self._clock_sig: tuple | None = None          # (phút, thời tiết) của lần vẽ đồng hồ gần nhất
+        self.weather: dict | None = None              # thời tiết hiện trên đồng hồ (HA đẩy xuống), None = không có
         self._ticker: threading.Thread | None = None
         self._stopping = False
 
@@ -246,6 +247,24 @@ class Screen:
             self._close_session()
             self.mode, self.source = "off", ""
 
+    def _clock_signature(self, now) -> tuple:
+        """Đồng hồ cần vẽ lại khi sang phút mới hoặc khi thời tiết đổi."""
+        w = tuple(sorted(self.weather.items())) if self.weather else None
+        return now.strftime("%H%M"), w
+
+    def set_weather(self, weather: dict | None) -> dict:
+        """Thời tiết cho đồng hồ: ``{"condition", "temp", "humidity", "high", "low"}`` hoặc None để bỏ."""
+        if weather is not None and (not isinstance(weather, dict) or "condition" not in weather):
+            raise ValueError("weather must be a dict with 'condition' (or None)")
+        with self._lock:
+            if weather == self.weather:
+                return self.status()
+            self.weather = dict(weather) if weather else None
+            if self.default["mode"] == "clock" and not self._layers and self._sender is not None:
+                self._cur_key = None                  # đang hiện đồng hồ: vẽ lại ngay
+                self._apply()
+        return self.status()
+
     def _default_layer(self) -> dict | None:
         mode, src = self.default["mode"], self.default["source"]
         if mode == "off":
@@ -254,8 +273,8 @@ class Screen:
             png = os.path.join(self._tmpdir, "clock.png")
             now = self._now()
             with open(png, "wb") as f:
-                f.write(render.render_clock(now))
-            self._clock_minute = now.strftime("%H%M")
+                f.write(render.render_clock(now, self.weather))
+            self._clock_sig = self._clock_signature(now)
             return {"owner": "default", "source": png, "mode": "clock", "loop": False, "after": "hold"}
         if not src:
             return None
@@ -475,7 +494,7 @@ class Screen:
                         self._cur_key = None
                         self._apply()
                     elif not self._layers and self.default["mode"] == "clock" \
-                            and self._now().strftime("%H%M") != self._clock_minute:
+                            and self._clock_signature(self._now()) != self._clock_sig:
                         self._cur_key = None
                         self._apply()
                     elif not self._layers and self.default["mode"] == "live" \
@@ -494,7 +513,7 @@ class Screen:
                 "open": bool(s and s.running),
                 "source": redact_source(self.source) if self.mode not in ("text", "clock") else self.mode,
                 "default": dict(self.default, source=redact_source(self.default["source"])),
-                "view": dict(self.view),
+                "view": dict(self.view), "weather": dict(self.weather) if self.weather else None,
                 "layers": [{"owner": l["owner"], "mode": l["mode"],
                             "source": redact_source(l["source"]) if l["mode"] not in ("text", "clock") else l["mode"],
                             "after": l["after"],

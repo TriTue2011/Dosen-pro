@@ -65,6 +65,9 @@ class LocalApi:
                              fit: str | None = None) -> dict[str, Any]:
         return await self._run(self.camera.screen.set_default, mode, source, **_view(rotate, fit))
 
+    async def screen_weather(self, weather: dict | None) -> dict[str, Any]:
+        return await self._run(self.camera.screen.set_weather, weather)
+
     async def screen_view(self, rotate: int | None = None, fit: str | None = None) -> dict[str, Any]:
         return await self._run(self.camera.screen.set_view, rotate, fit)
 

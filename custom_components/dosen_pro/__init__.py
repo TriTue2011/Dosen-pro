@@ -14,6 +14,7 @@ from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_USERNA
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import ConfigEntryError, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -105,6 +106,8 @@ class DosenCoordinator(DataUpdateCoordinator):
         self.default_camera = ""
         self.default_image = ""
         self.default_text = ""
+        self.default_weather = ""                # thực thể weather.* hiện trên đồng hồ ("" = không hiện)
+        self._unsub_weather = None
         self.default_rotate = 0                  # xoay hình (độ, theo chiều kim đồng hồ) cho mọi lớp không tự nêu
         self.default_fit = "contain"             # contain = vừa khung có viền; cover = lấp đầy màn, cắt rìa
         self.mic_level_db: float | None = None   # mức tiếng mic gần nhất (dBFS), None = chưa có luồng
@@ -149,6 +152,54 @@ class DosenCoordinator(DataUpdateCoordinator):
         except DosenApiError as exc:
             raise HomeAssistantError(f"Dosen Pro: {exc}") from exc
         await self.async_request_refresh()
+
+    # ── Thời tiết trên đồng hồ ────────────────────────────────────────
+
+    @callback
+    def track_weather(self) -> None:
+        """Theo dõi thực thể thời tiết đang chọn: đổi là đẩy xuống màn hình (đồng hồ vẽ lại)."""
+        if self._unsub_weather is not None:
+            self._unsub_weather()
+            self._unsub_weather = None
+        if self.default_weather:
+            self._unsub_weather = async_track_state_change_event(self.hass, [self.default_weather], self._on_weather_state)
+
+    @callback
+    def _on_weather_state(self, _event) -> None:
+        self.hass.async_create_task(self.push_weather_safe())
+
+    async def _forecast_range(self, entity_id: str, unit: str | None) -> tuple[float | None, float | None]:
+        """(cao nhất, thấp nhất) hôm nay theo dự báo hằng ngày của thực thể; không có dự báo thì (None, None)."""
+        try:
+            resp = await self.hass.services.async_call("weather", "get_forecasts", {"entity_id": entity_id, "type": "daily"},
+                                                       blocking=True, return_response=True)
+            today = ((resp or {}).get(entity_id) or {}).get("forecast", [])[0]
+            hi, lo = today.get("temperature"), today.get("templow")
+        except (HomeAssistantError, IndexError, KeyError, TypeError, AttributeError):
+            return None, None
+        return _celsius(hi, unit), _celsius(lo, unit)
+
+    async def push_weather(self) -> None:
+        """Đọc thực thể thời tiết đã chọn và đẩy xuống đồng hồ (None nếu chưa chọn / chưa có dữ liệu)."""
+        info = None
+        eid = self.default_weather
+        state = self.hass.states.get(eid) if eid else None
+        if state is not None and state.state not in ("unknown", "unavailable"):
+            a = state.attributes
+            unit = a.get("temperature_unit")
+            hi, lo = await self._forecast_range(eid, unit)
+            info = {"condition": state.state, "temp": _celsius(a.get("temperature"), unit),
+                    "humidity": a.get("humidity"), "high": hi, "low": lo}
+        try:
+            await self.api.screen_weather(info)
+        except DosenApiError as exc:
+            raise HomeAssistantError(f"Dosen Pro: {exc}") from exc
+
+    async def push_weather_safe(self) -> None:
+        try:
+            await self.push_weather()
+        except HomeAssistantError as exc:
+            _LOGGER.debug("Chưa đẩy được thời tiết xuống đồng hồ: %s", exc)
 
     @callback
     def set_in_call(self, in_call: bool) -> None:
@@ -309,6 +360,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if coord.alarm_events_on:
         entry.async_create_background_task(hass, coord._alarm_loop(), "dosen_pro alarm events")
     entry.async_on_unload(entry.add_update_listener(_options_updated))
+    entry.async_on_unload(lambda: coord._unsub_weather and coord._unsub_weather())
+    @callback
+    def _refresh_weather(_now) -> None:
+        hass.async_create_task(coord.push_weather_safe())
+    entry.async_on_unload(async_track_time_interval(          # dự báo cao/thấp đổi theo ngày: làm mới mỗi 30 phút
+        hass, _refresh_weather, timedelta(minutes=30)))
     entry.async_create_background_task(hass, _apply_default_safe(coord), "dosen_pro default screen")
     entry.async_create_background_task(hass, _read_audio_safe(coord), "dosen_pro read audio")
     return True
@@ -331,6 +388,17 @@ async def _read_audio_safe(coord: DosenCoordinator) -> None:
         _LOGGER.debug("Chưa đọc được âm lượng camera: %s", exc)
 
 
+def _celsius(value, unit: str | None) -> float | None:
+    """Số đo nhiệt độ về °C, làm tròn 1 số lẻ (Fahrenheit thì đổi); không đọc được thì None."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    if unit and "F" in str(unit):
+        v = (v - 32) * 5 / 9
+    return round(v, 1)
+
+
 #: Lúc HA mới khởi động, camera/ảnh mà màn mặc định cần (vd. camera go2rtc) có thể chưa nạp kịp, hoặc camera còn giữ phiên
 #: cũ (Ret=503): thử lại với khoảng nghỉ tăng dần thay vì bỏ cuộc ngay (đo 15/11: bỏ cuộc → màn camera tắt mãi).
 DEFAULT_RETRY_DELAYS = (0, 5, 10, 20, 30, 60, 60)
@@ -343,6 +411,8 @@ async def _apply_default_safe(coord: DosenCoordinator) -> None:
             await asyncio.sleep(delay)
         try:
             await coord.api.screen_view(coord.default_rotate, coord.default_fit)     # khôi phục xoay/khung đã chọn trước khi tắt HA
+            coord.track_weather()
+            await coord.push_weather()
             await coord.apply_default()
             return
         except (DosenApiError, HomeAssistantError, KeyError) as exc:

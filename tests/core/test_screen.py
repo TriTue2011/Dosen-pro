@@ -262,3 +262,25 @@ def test_live_stream_switches_to_avtalk_when_the_screen_opens_mid_call(fake_cam_
     finally:
         spk.stop()
         scr.off()
+
+
+def test_weather_on_the_clock_redraws_it_and_bad_input_is_refused(fake_cam_avtalk, cfg):
+    scr = Screen(cfg)
+    try:
+        assert scr.set_default("clock")["mode"] == "clock"
+        assert _wait(lambda: scr.status()["sender"] and scr.status()["sender"]["key_packets"] >= 1)
+        n = scr.status()["switches"]
+        scr.set_weather({"condition": "rainy", "temp": 24.0, "humidity": 90})
+        assert _wait(lambda: scr.status()["switches"] == n + 1)                 # đổi thời tiết → vẽ lại ngay
+        assert scr.status()["weather"]["condition"] == "rainy"
+        scr.set_weather({"condition": "rainy", "temp": 24.0, "humidity": 90})   # y hệt → không vẽ lại
+        time.sleep(0.5)
+        assert scr.status()["switches"] == n + 1
+        scr.set_weather(None)
+        assert _wait(lambda: scr.status()["switches"] == n + 2) and scr.status()["weather"] is None
+        for bad in ({}, {"temp": 3}, "mưa"):
+            with pytest.raises(ValueError):
+                scr.set_weather(bad)
+    finally:
+        scr.off()
+        scr.close()
