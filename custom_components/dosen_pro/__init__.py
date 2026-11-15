@@ -24,6 +24,8 @@ from .const import (CONF_INTERCOM_KEY, CONF_ALARM_EVENTS, CONF_URL, DEFAULT_MODE
 from .dosen_core.camera import Camera
 from .intercom import DosenIntercomView
 from .dosen_core.config import CamConfig
+from .card import build_card
+from .dosen_core.render import CARD_COLORS
 from .dosen_core.screen import FITS, ROTATIONS
 from .resolve import resolve_camera, resolve_image, resolve_media, resolve_source
 
@@ -35,7 +37,25 @@ _MESSAGE = vol.Schema({
     vol.Optional("role", default="info"): vol.In(["user", "assistant", "caller", "info"]),
     vol.Required("text"): cv.string,
 })
+_CARD_ROW = vol.Schema({
+    vol.Required("label"): cv.string,
+    vol.Required("value"): cv.string,
+    vol.Optional("color"): vol.In(list(CARD_COLORS)),
+})
 SERVICE_SCHEMAS = {
+    "screen_card": vol.Schema({
+        vol.Optional("entry_id"): cv.string,
+        vol.Optional("title", default=""): cv.string,
+        vol.Optional("value", default=""): cv.string,
+        vol.Optional("caption", default=""): cv.string,
+        vol.Optional("color", default="red"): vol.In(list(CARD_COLORS)),
+        vol.Optional("main_entity"): cv.entity_id,
+        vol.Optional("entities", default=[]): vol.All(cv.ensure_list, [cv.entity_id]),
+        vol.Optional("rows", default=[]): vol.All(cv.ensure_list, [vol.Any(_CARD_ROW, cv.string)]),
+        vol.Optional("after", default="hold"): vol.In(["off", "hold"]),
+        vol.Optional("owner", default="automation"): cv.string,
+        vol.Optional("ttl"): vol.All(vol.Coerce(float), vol.Range(min=1, max=86400)),
+    }),
     "screen_show": vol.All(vol.Schema({
         vol.Optional("entry_id"): cv.string,
         vol.Optional("source"): cv.string,
@@ -301,6 +321,8 @@ async def _handle(hass: HomeAssistant, call: ServiceCall) -> None:
         elif call.service == "screen_text":
             await api.screen_text(d["title"], d["messages"], d["font_size"], d["after"], d["owner"],
                                   d.get("ttl"))
+        elif call.service == "screen_card":
+            await api.screen_card(build_card(coord.hass, d), d["after"], d["owner"], d.get("ttl"))
         elif call.service == "screen_release":
             await api.screen_release(d["owner"])
         elif call.service == "screen_default":

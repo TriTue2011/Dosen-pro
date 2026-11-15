@@ -1,0 +1,80 @@
+blueprint:
+  name: "Dosen Pro: thẻ thông tin lên màn camera (điện, nhiệt độ, cảm biến…)"
+  description: >-
+    Hiện lên màn camera một **thẻ thông tin** gồm một **số lớn** (một cảm biến chính) và các dòng
+    **nhãn – giá trị** lấy thẳng từ thực thể của Home Assistant: điện năng lượng mặt trời, điện tiêu thụ, nhiệt độ
+    các phòng, cửa, pin… Chọn thực thể theo danh sách, không cần viết mẫu. Thẻ vẽ lại mỗi khi điều kiện bạn chọn xảy ra; hết thời gian giữ hoặc có sự kiện khác đè lên thì màn về màn hình mặc định.
+    Cần nhiều thẻ khác nhau thì tạo nhiều automation, mỗi cái một «Tên lớp».
+  domain: automation
+  author: TriTue2011
+  homeassistant:
+    min_version: 2024.11.0
+  input:
+    bat_dau:
+      name: Khi nào hiện / làm mới thẻ
+      description: >-
+        Mỗi lần điều kiện này xảy ra, thẻ được vẽ lại với giá trị MỚI NHẤT của các thực thể. Ví dụ: «Thời gian: mỗi phút»
+        để thẻ luôn mới, «Trạng thái» của cảm biến chính để cập nhật ngay khi đổi, hoặc bấm nút / có người ở gần để hiện thẻ.
+        Thêm nhiều điều kiện được.
+      default: []
+      selector:
+        trigger: {}
+    tieu_de:
+      name: Tiêu đề
+      default: "Thông tin"
+      selector:
+        text: {}
+    cam_bien_chinh:
+      name: Cảm biến chính (số lớn)
+      description: "Giá trị hiện to ở giữa thẻ; để trống nếu chỉ cần các dòng."
+      default: ""
+      selector:
+        entity: {}
+    mau:
+      name: Màu số lớn
+      default: red
+      selector:
+        select:
+          options:
+            - {value: red, label: "Đỏ"}
+            - {value: green, label: "Xanh lá"}
+            - {value: blue, label: "Xanh dương"}
+            - {value: orange, label: "Cam"}
+            - {value: black, label: "Đen"}
+    cac_dong:
+      name: Các dòng thông tin
+      description: "Mỗi thực thể một dòng: tên và giá trị kèm đơn vị. Tối đa 6 dòng khi có số lớn, 8 dòng nếu không."
+      default: []
+      selector:
+        entity:
+          multiple: true
+    giu:
+      name: Giữ trên màn bao lâu (giây)
+      description: "0 = tới khi có sự kiện khác đè lên hoặc bạn gỡ lớp."
+      default: 30
+      selector:
+        number: {min: 0, max: 3600, unit_of_measurement: "s", mode: box}
+    ten_lop:
+      name: Tên lớp
+      description: "Cùng tên thì thay nhau. Đừng dùng «assist» và «zalo_call» (dành cho Assist và cuộc gọi Zalo)."
+      default: "the_thong_tin"
+      selector:
+        text: {}
+mode: restart
+max_exceeded: silent
+trigger: !input bat_dau
+action:
+  - action: dosen_pro.screen_card
+    data: >-
+      {% set d = {'title': tieu_de, 'color': mau, 'owner': ten_lop, 'after': 'hold'} %}
+      {% if cam_bien_chinh != '' %}{% set d = dict(d, main_entity=cam_bien_chinh) %}{% endif %}
+      {% if cac_dong | count > 0 %}{% set d = dict(d, entities=cac_dong) %}{% endif %}
+      {% if giu | float(0) > 0 %}{% set d = dict(d, ttl=giu | float) %}{% endif %}
+      {{ d }}
+variables:
+  tieu_de: !input tieu_de
+  cam_bien_chinh: !input cam_bien_chinh
+  mau: !input mau
+  cac_dong: !input cac_dong
+  giu: !input giu
+  ten_lop: !input ten_lop

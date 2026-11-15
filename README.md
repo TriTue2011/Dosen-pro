@@ -121,9 +121,56 @@ Dosen cung cấp đủ ba thứ cho tích hợp **Zalo Calling**:
 
 > Phía Zalo Calling cần bản có hỗ trợ Dosen làm mic/loa; bản đó chưa có trong kho Zalo Calling công khai tại thời điểm phát hành này.
 
+## Tự chế thông tin trên màn: thẻ thông tin
+
+Muốn hiện **điện năng lượng mặt trời, nhiệt độ các phòng, cảm biến cửa, pin…** lên màn camera? Dịch vụ `dosen_pro.screen_card` vẽ một **thẻ**
+cùng kiểu với đồng hồ (chữ đen, số màu): tiêu đề, **một số lớn** và tối đa 6 dòng *nhãn – giá trị* (8 dòng nếu không có số lớn).
+Chỉ cần khai dữ liệu, không phải tự vẽ ảnh. Chọn trực tiếp **thực thể của Home Assistant**: tích hợp tự lấy tên, trạng thái, đơn vị
+(số được làm tròn kiểu Việt Nam, `3,5 kW`; thực thể mất kết nối hiện «—»).
+
+| Trường | Ý nghĩa |
+|---|---|
+| `title` | Tiêu đề (tự thu nhỏ nếu dài). |
+| `main_entity` | Cảm biến chính: giá trị thành **số lớn**, tên thành nhãn dưới số. Hoặc tự điền `value` / `caption`. |
+| `color` | Màu số lớn: `red` (mặc định), `green`, `blue`, `orange`, `black`. |
+| `entities` | Danh sách thực thể, mỗi cái một dòng (tên + giá trị kèm đơn vị). |
+| `rows` | Dòng tự khai: `"Hôm nay: 18,6 kWh"` hoặc `{label, value, color}` (màu từng dòng). Đứng trước các dòng của `entities`. |
+| `owner`, `ttl`, `after` | Như `screen_text`: lớp theo `owner` thay nhau; hết `ttl` về màn mặc định. |
+
+```yaml
+# Điện năng lượng mặt trời
+- action: dosen_pro.screen_card
+  data:
+    title: "Điện năng lượng mặt trời"
+    main_entity: sensor.cong_suat_mat_troi        # số lớn: 3,4 kW
+    color: green
+    entities:                                      # mỗi thực thể một dòng
+      - sensor.san_luong_hom_nay
+      - sensor.dien_tieu_thu_nha
+      - sensor.pin_luu_tru
+    ttl: 60
+
+# Nhiệt độ các phòng, có dòng tự khai
+- action: dosen_pro.screen_card
+  data:
+    title: "Nhiệt độ"
+    color: orange
+    main_entity: sensor.nhiet_do_phong_khach
+    entities: [sensor.nhiet_do_phong_ngu, sensor.nhiet_do_bep, sensor.do_am_phong_khach]
+    rows:
+      - "Ngoài trời: {{ states('sensor.nhiet_do_ngoai_troi') }} °C"   # mẫu Jinja dùng bình thường
+      - {label: "Cảnh báo", value: "Nóng", color: red}
+```
+
+Không muốn viết automation: dùng blueprint **`man_hinh_the_thong_tin.yaml`**, chọn cảm biến chính và các dòng theo danh sách, rồi thêm điều kiện
+«Thời gian: mỗi phút» (để thẻ luôn mới) hoặc bấm nút / có người ở gần (để hiện). Mỗi thẻ một automation với một «Tên lớp» riêng.
+
+Người khác muốn đóng góp thẻ mới (giá vàng, thời gian đi làm, lịch trực…) chỉ cần viết một blueprint hoặc automation gọi `screen_card` và gửi vào
+thư mục `blueprints/automation/dosen_pro/`; không phải sửa mã Python. Muốn bố cục hoàn toàn riêng thì tự tạo ảnh 240×320 và dùng `screen_show`.
+
 ## Dịch vụ
 
-`dosen_pro.screen_show` (nguồn: `camera_entity`, `media`, hoặc gõ `source`), `screen_text`, `screen_release`, `screen_default`,
+`dosen_pro.screen_show` (nguồn: `camera_entity`, `media`, hoặc gõ `source`), `screen_text`, `screen_card`, `screen_release`, `screen_default`,
 `screen_off`, `screen_power`, `screen_sleep`, `speaker_play`, `speaker_stop`. Xem mô tả từng trường trong *Công cụ nhà phát triển → Dịch vụ*.
 
 ```yaml
@@ -149,13 +196,14 @@ Dosen cung cấp đủ ba thứ cho tích hợp **Zalo Calling**:
 
 ## Blueprint
 
-Chép ba tệp trong `blueprints/automation/dosen_pro/` vào `/config/blueprints/automation/dosen_pro/` (hoặc nhập bằng đường dẫn raw).
+Chép các tệp trong `blueprints/automation/dosen_pro/` vào `/config/blueprints/automation/dosen_pro/` (hoặc nhập bằng đường dẫn raw).
 
 | Blueprint | Làm gì |
 |---|---|
 | `man_hinh_su_kien.yaml` | Có sự kiện (chuông cửa, phát hiện người…) thì chiếu video / camera trực tiếp / ảnh / chữ lên màn, giữ N giây. |
 | `man_hinh_cuoc_goi_zalo.yaml` | Cuộc gọi Zalo đến / đang gọi / đang nói chuyện hiện lên màn (tên người gọi, và hình video nếu điền địa chỉ). |
 | `nut_goi_camera_zalo.yaml` | Bấm nút gọi: có cuộc gọi Zalo đến thì **nghe máy**, không thì **gọi Zalo đi** cho người đã chọn. |
+| `man_hinh_the_thong_tin.yaml` | Thẻ thông tin (số lớn + các dòng) từ thực thể HA: điện, nhiệt độ, cảm biến… |
 
 ## Nút gọi trên camera
 

@@ -612,3 +612,30 @@ def test_brand_icons_exist_with_the_sizes_home_assistant_expects():
         img = Image.open(brand / name)
         assert img.size == (size, size) and img.mode == "RGBA", name
         assert img.getchannel("A").getextrema()[0] == 0, f"{name}: góc phải trong suốt"
+
+
+async def test_screen_card_builds_rows_from_entities_and_text(hass):
+    await _setup(hass)
+    hass.states.async_set("sensor.solar", "3.4567", {"unit_of_measurement": "kW", "friendly_name": "Công suất mặt trời"})
+    hass.states.async_set("sensor.pin", "87", {"unit_of_measurement": "%", "friendly_name": "Pin"})
+    hass.states.async_set("sensor.cua", "Đóng", {"friendly_name": "Cửa chính"})
+    hass.states.async_set("sensor.hong", "unavailable", {"friendly_name": "Cảm biến hỏng"})
+    hass.states.async_set("sensor.lon", "1234.56", {"unit_of_measurement": "W", "friendly_name": "Điện nhà"})
+    await hass.services.async_call(DOMAIN, "screen_card", {
+        "title": "Điện", "main_entity": "sensor.solar", "color": "green", "ttl": 60, "owner": "dien",
+        "rows": ["Hôm nay: 18,6 kWh", {"label": "Bán lưới", "value": "2,2 kW", "color": "blue"}],
+        "entities": ["sensor.pin", "sensor.cua", "sensor.hong", "sensor.lon", "sensor.khong_co"]}, blocking=True)
+    card = _calls("card")[-1]
+    assert card["title"] == "Điện" and card["value"] == "3,5 kW" and card["caption"] == "Công suất mặt trời"    # số lớn từ cảm biến chính
+    assert card["color"] == "green" and card["owner"] == "dien" and card["ttl"] == 60 and card["after"] == "hold"
+    assert card["rows"] == [
+        {"label": "Hôm nay", "value": "18,6 kWh"},                                  # dòng chữ «nhãn: giá trị»
+        {"label": "Bán lưới", "value": "2,2 kW", "color": "blue"},
+        {"label": "Pin", "value": "87 %"}, {"label": "Cửa chính", "value": "Đóng"},
+        {"label": "Cảm biến hỏng", "value": "—"},                                   # không đọc được → «—»
+        {"label": "Điện nhà", "value": "1235 W"},                                   # số lớn làm tròn nguyên
+        {"label": "sensor.khong_co", "value": "—"}]                                  # thực thể không tồn tại
+    with pytest.raises(vol.Invalid):
+        await hass.services.async_call(DOMAIN, "screen_card", {"color": "tim"}, blocking=True)
+    await hass.services.async_call(DOMAIN, "screen_card", {"value": "5", "caption": "tự khai"}, blocking=True)    # không cần thực thể
+    assert _calls("card")[-1]["value"] == "5" and _calls("card")[-1]["rows"] == []

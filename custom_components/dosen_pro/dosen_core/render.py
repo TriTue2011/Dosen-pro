@@ -275,3 +275,66 @@ def render_clock(now, weather: dict | None = None) -> bytes:
     buf = io.BytesIO()
     img.save(buf, "PNG")
     return buf.getvalue()
+
+
+# ── Thẻ thông tin tự chế: số lớn + các dòng nhãn–giá trị (cùng kiểu với đồng hồ) ─────────────────────────────
+
+CARD_COLORS = {"black": INK, "red": RED, "blue": (0, 90, 200), "green": (0, 130, 50), "orange": (225, 110, 0)}
+CARD_MAX_ROWS_WITH_VALUE, CARD_MAX_ROWS = 6, 8
+
+
+def _fit_font(d, text: str, max_w: int, size: int, min_size: int = 11, bold: bool = False):
+    """Font lớn nhất (từ ``size`` xuống ``min_size``) mà ``text`` còn vừa ``max_w``; vẫn không vừa thì cắt chữ thêm «…»."""
+    f = _font(size, bold)
+    while d.textlength(text, font=f) > max_w and size > min_size:
+        size -= 1
+        f = _font(size, bold)
+    if d.textlength(text, font=f) > max_w:
+        while len(text) > 1 and d.textlength(text + "…", font=f) > max_w:
+            text = text[:-1]
+        text += "…"
+    return text, f
+
+
+def render_card(title: str = "", value: str = "", caption: str = "", rows: list | None = None,
+                color: str = "red") -> bytes:
+    """PNG 240x320: tiêu đề, MỘT SỐ LỚN (``value``) kèm nhãn (``caption``), rồi các dòng ``{label, value, color?}``.
+
+    Ai cũng dùng được cho điện năng, nhiệt độ, cảm biến…: chỉ khai dữ liệu, bố cục tự lo. Nhiều dòng quá thì bỏ bớt cuối;
+    chữ dài tự thu nhỏ rồi cắt. Chữ đen, số màu (``CARD_COLORS``) — cùng bảng màu với đồng hồ."""
+    colour = CARD_COLORS.get(color, RED)
+    img = Image.new("RGB", (WIDTH, HEIGHT), CLOCK_BG)
+    d = ImageDraw.Draw(img)
+    y = 8
+    if title:
+        text, f = _fit_font(d, str(title), WIDTH - 16, 19, 12, True)
+        _centered(d, text, f, WIDTH / 2, y, INK)
+        y += 30
+        d.line([8, y, WIDTH - 8, y], fill=RULE, width=1)
+        y += 8
+    if value:
+        text, f = _fit_font(d, str(value), WIDTH - 16, 58, 24, True)
+        _centered(d, text, f, WIDTH / 2, y, colour)
+        y += int(f.size * 1.2) + 2
+        if caption:
+            text, f = _fit_font(d, str(caption), WIDTH - 16, 16, 11, True)
+            _centered(d, text, f, WIDTH / 2, y, INK)
+            y += 24
+        y += 6
+    rows = list(rows or [])[:CARD_MAX_ROWS_WITH_VALUE if value else CARD_MAX_ROWS]
+    if rows:
+        d.line([8, y, WIDTH - 8, y], fill=RULE, width=1)
+        y += 4
+        step = min(34, (HEIGHT - 8 - y) // len(rows))
+        for r in rows:
+            vtext, vfont = _fit_font(d, str(r.get("value", "")), 108, 17, 11, True)
+            vw = d.textlength(vtext, font=vfont)
+            ltext, lfont = _fit_font(d, str(r.get("label", "")), WIDTH - 24 - int(vw) - 8, 15, 11)
+            ty = y + (step - 20) // 2
+            d.text((10, ty), ltext, font=lfont, fill=INK)
+            d.text((WIDTH - 10 - vw, ty), vtext, font=vfont, fill=CARD_COLORS.get(r.get("color"), INK))
+            y += step
+            d.line([8, y, WIDTH - 8, y], fill=(200, 200, 194), width=1)
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()

@@ -27,7 +27,8 @@ async def _auto(hass, name, inputs, tmp_path):
     await hass.async_block_till_done()
 
 
-@pytest.mark.parametrize("name", ["man_hinh_su_kien.yaml", "man_hinh_cuoc_goi_zalo.yaml", "nut_goi_camera_zalo.yaml"])
+@pytest.mark.parametrize("name", ["man_hinh_su_kien.yaml", "man_hinh_cuoc_goi_zalo.yaml", "nut_goi_camera_zalo.yaml",
+                                  "man_hinh_the_thong_tin.yaml"])
 def test_blueprints_load(name):
     bp = _bp(name)
     assert bp.metadata["domain"] == "automation" and bp.inputs
@@ -108,3 +109,24 @@ async def test_call_button_blueprint_answers_or_dials(hass, tmp_path):
     hass.bus.async_fire("zalo_call_call_state", {"state": "ended"})
     await hass.async_block_till_done()
     assert hass.states.get("input_boolean.co_goi").state == "off"
+
+
+async def test_info_card_blueprint_sends_main_sensor_rows_and_ttl(hass, tmp_path):
+    cards = async_mock_service(hass, "dosen_pro", "screen_card")
+    await _auto(hass, "man_hinh_the_thong_tin.yaml", {
+        "bat_dau": [{"platform": "event", "event_type": "xem_dien"}], "tieu_de": "Điện mặt trời", "cam_bien_chinh": "sensor.solar",
+        "mau": "green", "cac_dong": ["sensor.nha", "sensor.pin"], "giu": 45, "ten_lop": "dien"}, tmp_path)
+    hass.bus.async_fire("xem_dien")
+    await hass.async_block_till_done()
+    assert cards[-1].data == {"title": "Điện mặt trời", "color": "green", "owner": "dien", "after": "hold",
+                              "main_entity": "sensor.solar", "entities": ["sensor.nha", "sensor.pin"], "ttl": 45.0}
+
+
+async def test_info_card_blueprint_without_main_sensor_or_ttl_sends_only_what_is_chosen(hass, tmp_path):
+    cards = async_mock_service(hass, "dosen_pro", "screen_card")
+    await _auto(hass, "man_hinh_the_thong_tin.yaml", {
+        "bat_dau": [{"platform": "event", "event_type": "xem_cb"}], "cac_dong": ["sensor.a"], "giu": 0}, tmp_path)
+    hass.bus.async_fire("xem_cb")
+    await hass.async_block_till_done()
+    d = cards[-1].data
+    assert "main_entity" not in d and "ttl" not in d and d["entities"] == ["sensor.a"] and d["title"] == "Thông tin"

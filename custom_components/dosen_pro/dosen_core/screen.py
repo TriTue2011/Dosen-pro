@@ -391,6 +391,25 @@ class Screen:
                     pass
         return status
 
+    def show_card(self, title: str = "", value: str = "", caption: str = "", rows: list | None = None,
+                  color: str = "red", after: str = "hold", owner: str = "api", ttl: float | None = None) -> dict:
+        """Thẻ thông tin (số lớn + các dòng nhãn–giá trị): vẽ rồi hiện như một lớp sự kiện (xem ``render.render_card``)."""
+        if color not in render.CARD_COLORS:
+            raise ValueError("color must be one of " + ", ".join(render.CARD_COLORS))
+        png = render.render_card(title, value, caption, rows, color)
+        path = os.path.join(self._tmpdir, "text-%s-%d.png" % (re.sub(r"\W", "_", owner), self.switches + 1))
+        with open(path, "wb") as f:
+            f.write(png)
+        status = self.show(path, after=after, owner=owner, ttl=ttl, mode="text")
+        for old in os.listdir(self._tmpdir):               # giữ ảnh chữ/thẻ mới nhất và đồng hồ, như show_text
+            if old.startswith("text-") and old != os.path.basename(path) \
+                    and not any(l["source"].endswith(old) for l in self._layers):
+                try:
+                    os.remove(os.path.join(self._tmpdir, old))
+                except OSError:
+                    pass
+        return status
+
     def release(self, owner: str) -> dict:
         """End the layer of ``owner`` (no error if it is already gone)."""
         with self._lock:

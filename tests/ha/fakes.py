@@ -27,6 +27,11 @@ class FakeScreen:
                                     "owner": owner, "ttl": ttl}))
         return self._status
 
+    def show_card(self, title, value, caption, rows, color, after, owner, ttl):
+        self.calls.append(("card", {"title": title, "value": value, "caption": caption, "rows": rows, "color": color,
+                                    "after": after, "owner": owner, "ttl": ttl}))
+        return self._status
+
     def release(self, owner):
         self.calls.append(("release", owner))
         return self._status

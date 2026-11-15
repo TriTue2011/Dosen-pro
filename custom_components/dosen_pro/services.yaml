@@ -46,6 +46,43 @@ screen_text:
       selector: {number: {min: 1, max: 86400, unit_of_measurement: "s", mode: box}}
     entry_id:
       selector: {text: {}}
+screen_card:
+  fields:
+    title:
+      example: "Điện năng lượng mặt trời"
+      selector: {text: {}}
+    main_entity:
+      selector:
+        entity: {}
+    value:
+      example: "3,4 kW"
+      selector: {text: {}}
+    caption:
+      example: "Đang phát"
+      selector: {text: {}}
+    color:
+      default: "red"
+      selector:
+        select:
+          options: ["red", "black", "blue", "green", "orange"]
+    entities:
+      selector:
+        entity: {multiple: true}
+    rows:
+      example: '[{"label": "Hôm nay", "value": "18,6 kWh"}, {"label": "Pin", "value": "87 %", "color": "green"}]'
+      selector: {object: {}}
+    after:
+      default: "hold"
+      selector:
+        select:
+          options: ["off", "hold"]
+    owner:
+      default: "automation"
+      selector: {text: {}}
+    ttl:
+      selector: {number: {min: 1, max: 86400, unit_of_measurement: "s", mode: box}}
+    entry_id:
+      selector: {text: {}}
 screen_release:
   fields:
     owner:
