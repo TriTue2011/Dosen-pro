@@ -15,8 +15,8 @@
   ],
   "documentation": "https://github.com/TriTue2011/Dosen-pro",
   "integration_type": "device",
-  "iot_class": "local_polling",
+  "iot_class": "local_push",
   "issue_tracker": "https://github.com/TriTue2011/Dosen-pro/issues",
   "requirements": [],
-  "version": "2026.11.15.8"
+  "version": "2026.11.16.0"
 }

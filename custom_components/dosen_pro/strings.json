@@ -3,24 +3,29 @@
     "step": {
       "user": {
         "title": "Dosen Pro",
-        "description": "Địa chỉ dịch vụ Docker Dosen Pro",
+        "description": "Kết nối thẳng tới camera, không cần dịch vụ nào khác. Nên tạo một tài khoản riêng trên camera cho Dosen.",
         "data": {
-          "url": "Địa chỉ (http://máy:8080)",
-          "api_key": "Khoá API (nếu có)"
+          "host": "IP camera",
+          "port": "Cổng DVRIP",
+          "username": "Tài khoản camera",
+          "password": "Mật khẩu camera"
         }
       },
       "reconfigure": {
         "title": "Cấu hình lại Dosen Pro",
-        "description": "Đổi địa chỉ dịch vụ hoặc khoá API",
+        "description": "Đổi IP, tài khoản hoặc mật khẩu camera",
         "data": {
-          "url": "Địa chỉ (http://máy:8080)",
-          "api_key": "Khoá API (nếu có)"
+          "host": "IP camera",
+          "port": "Cổng DVRIP",
+          "username": "Tài khoản camera",
+          "password": "Mật khẩu camera"
         }
       }
     },
     "error": {
-      "cannot_connect": "Không nối được dịch vụ",
-      "invalid_auth": "Khoá API sai"
+      "cannot_connect": "Không nối được camera (kiểm tra IP và cổng)",
+      "invalid_auth": "Sai tài khoản hoặc mật khẩu camera",
+      "account_locked": "Tài khoản camera đang bị khoá: đợi, hoặc tạo tài khoản mới trên camera"
     },
     "abort": {
       "already_configured": "Đã cấu hình",

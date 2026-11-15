@@ -1,8 +1,9 @@
 """Hằng số của tích hợp Dosen Pro."""
 
 DOMAIN = "dosen_pro"
-CONF_URL = "url"
+CONF_URL = "url"                    # chỉ còn để nhận ra mục cấu hình cũ (kiểu dịch vụ Docker)
 CONF_API_KEY = "api_key"
+DEFAULT_PORT = 34567
 SCAN_INTERVAL_SECONDS = 10
 
 #: Tiếng mic đưa vào pipeline: PCM16 mono 16 kHz — định dạng Assist đòi (mic camera gốc 8 kHz, ffmpeg đổi).

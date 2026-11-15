@@ -20,6 +20,8 @@ def _absolute(hass: HomeAssistant, url: str, expire: timedelta = LONG_LIVED, bas
     Địa chỉ HA dùng: ``base`` (do người dùng đặt trong «Cấu hình»), không có thì địa chỉ nội bộ, rồi địa chỉ ngoài."""
     if not url.startswith("/"):
         return url
+    if not base and hass.config.api is not None:
+        base = f"http://127.0.0.1:{hass.config.api.port}"       # ffmpeg chạy ngay trong HA: gọi thẳng chính nó
     if not base:
         try:
             base = get_url(hass, prefer_external=False)          # nội bộ trước, không có thì địa chỉ ngoài

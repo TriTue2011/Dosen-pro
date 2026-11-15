@@ -176,20 +176,23 @@ class DosenSatellite(DosenEntity, AssistSatelliteEntity):
             yield khuc
 
     async def _doc_mic(self) -> None:
-        """ffmpeg đọc luồng mic của dịch vụ liên tục; đứt thì mở lại."""
+        """Mic camera (PCM 8 kHz từ lõi) → ffmpeg của HA (lọc, tăng, đổi 16 kHz) → hàng đợi cho pipeline. Đứt thì mở lại,
+        thưa dần: mỗi lần mở mic là một lần đăng nhập camera."""
         api = self._data.api
         loi = 0                                  # số lần mở mic hỏng liên tiếp (để giãn nhịp thử lại)
         while True:
-            lenh = [get_ffmpeg_manager(self.hass).binary, "-nostdin", "-hide_banner", "-loglevel", "error"]
-            if api.mic_headers:
-                lenh += ["-headers", api.mic_headers]
-            lenh += ["-i", api.mic_url, "-vn", "-af", loc_mic(self._data.mic_gain_db),
-                     "-ac", "1", "-ar", str(MIC_RATE), "-f", "s16le", "pipe:"]
-            proc = self._mic_proc = await asyncio.create_subprocess_exec(
-                *lenh, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL)
-            n = 0
+            proc = None
+            feeder = None
             try:
+                await api.mic_start()
+                lenh = [get_ffmpeg_manager(self.hass).binary, "-hide_banner", "-loglevel", "error",
+                        "-f", "s16le", "-ar", "8000", "-ac", "1", "-i", "pipe:0", "-vn",
+                        "-af", loc_mic(self._data.mic_gain_db), "-ac", "1", "-ar", str(MIC_RATE), "-f", "s16le", "pipe:1"]
+                proc = self._mic_proc = await asyncio.create_subprocess_exec(
+                    *lenh, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL)
+                feeder = asyncio.create_task(self._nap_mic(proc))
+                n = 0
                 while True:
                     khuc = await proc.stdout.readexactly(MIC_CHUNK)
                     loi = 0
@@ -201,21 +204,40 @@ class DosenSatellite(DosenEntity, AssistSatelliteEntity):
                     if self._hang.full():
                         self._hang.get_nowait()
                     self._hang.put_nowait(khuc)
-            except asyncio.IncompleteReadError:
-                self._data.set_mic_level(None)
+            except DosenApiError as exc:
+                _LOGGER.debug("%s: cannot open the mic: %s", self.entity_id, exc)
+            except (asyncio.IncompleteReadError, ConnectionError):
                 if not self._mo_lai_mic:
                     _LOGGER.warning("%s: mic stream ended, reopening", self.entity_id)
             finally:
-                if proc.returncode is None:
-                    proc.kill()
-                await proc.wait()
+                self._data.set_mic_level(None)
+                if feeder is not None:
+                    feeder.cancel()
+                if proc is not None:
+                    if proc.returncode is None:
+                        proc.kill()
+                    await proc.wait()
             if self._mo_lai_mic:
                 self._mo_lai_mic = False
             else:
-                # Camera từ chối / dịch vụ tắt: thưa dần 5 s → 10 → 20 … tối đa 5 phút. Mỗi lần mở mic là một lần
-                # đăng nhập camera: thử dồn dập có thể làm camera khoá tài khoản lâu hơn.
+                # Camera từ chối / mic đứt: thưa dần 5 s → 10 → 20 … tối đa 5 phút.
                 loi += 1
                 await asyncio.sleep(min(300, 5 * 2 ** (loi - 1)))
+
+    async def _nap_mic(self, proc) -> None:
+        """Đọc khúc PCM từ camera, ghi vào ffmpeg. Luồng mic đứt thì đóng đầu vào để vòng nghe mở lại."""
+        api = self._data.api
+        try:
+            while api.mic_alive:
+                chunk = await api.mic_read(1.0)
+                if chunk:
+                    proc.stdin.write(chunk)
+                    await proc.stdin.drain()
+        except (ConnectionError, OSError):
+            pass
+        finally:
+            with contextlib.suppress(OSError, ConnectionError):
+                proc.stdin.close()
 
     # ── Hiện hội thoại trên màn camera ──────────────────────────────
 

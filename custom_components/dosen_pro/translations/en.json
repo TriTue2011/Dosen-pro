@@ -3,24 +3,29 @@
     "step": {
       "user": {
         "title": "Dosen Pro",
-        "description": "Address of the Dosen Pro Docker service",
+        "description": "Connects straight to the camera, no other service needed. Create a dedicated camera account for Dosen.",
         "data": {
-          "url": "URL (http://host:8080)",
-          "api_key": "API key (if any)"
+          "host": "Camera IP",
+          "port": "DVRIP port",
+          "username": "Camera account",
+          "password": "Camera password"
         }
       },
       "reconfigure": {
         "title": "Reconfigure Dosen Pro",
-        "description": "Change the service address or API key",
+        "description": "Change the camera IP, account or password",
         "data": {
-          "url": "URL (http://host:8080)",
-          "api_key": "API key (if any)"
+          "host": "Camera IP",
+          "port": "DVRIP port",
+          "username": "Camera account",
+          "password": "Camera password"
         }
       }
     },
     "error": {
-      "cannot_connect": "Cannot reach the service",
-      "invalid_auth": "Wrong API key"
+      "cannot_connect": "Cannot reach the camera",
+      "invalid_auth": "Wrong camera account or password",
+      "account_locked": "The camera account is locked: wait, or create a new account on the camera"
     },
     "abort": {
       "already_configured": "Already configured",

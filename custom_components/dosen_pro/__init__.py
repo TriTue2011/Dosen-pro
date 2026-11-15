@@ -8,16 +8,19 @@ from datetime import timedelta
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
+from homeassistant.components.ffmpeg import get_ffmpeg_manager
+from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_USERNAME, Platform
 from homeassistant.core import HomeAssistant, ServiceCall, callback
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import ConfigEntryError, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
-from .api import DosenApi, DosenApiError
-from .const import (CONF_ALARM_EVENTS, CONF_API_KEY, CONF_URL, DEFAULT_MODES, DOMAIN, EVENT_ALARM,
+from .api import DosenApiError, LocalApi
+from .const import (CONF_ALARM_EVENTS, CONF_URL, DEFAULT_MODES, DEFAULT_PORT, DOMAIN, EVENT_ALARM,
                     OPT_HA_URL, SCAN_INTERVAL_SECONDS)
+from .dosen_core.camera import Camera
+from .dosen_core.config import CamConfig
 from .resolve import resolve_camera, resolve_image, resolve_media, resolve_source
 
 _LOGGER = logging.getLogger(__name__)
@@ -79,7 +82,7 @@ SERVICE_SCHEMAS = {
 
 
 class DosenCoordinator(DataUpdateCoordinator):
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, api: DosenApi) -> None:
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, api: LocalApi) -> None:
         super().__init__(hass, _LOGGER, name=DOMAIN,
                          update_interval=timedelta(seconds=SCAN_INTERVAL_SECONDS))
         self.api = api
@@ -148,25 +151,28 @@ class DosenCoordinator(DataUpdateCoordinator):
         self._on_alarm.append(fn)
         return lambda: self._on_alarm.remove(fn)
 
+    @callback
+    def _on_alarm_event(self, record: dict) -> None:
+        """Chạy trong vòng lặp HA: một báo động camera → sự kiện bus ``dosen_pro_alarm`` (để blueprint/automation bắt,
+        kể cả nút gọi của camera khi biết tên event) và thực thể «Sự kiện camera»."""
+        alarm = record.get("alarm") or {}
+        payload = {"entry_id": self.entry.entry_id, "event": record.get("event"), "status": alarm.get("Status"),
+                   "alarm": alarm, "possible_button_press": record.get("possible_button_press", False)}
+        self.hass.bus.async_fire(EVENT_ALARM, payload)
+        for fn in list(self._on_alarm):
+            fn(payload)
+
     async def _alarm_loop(self) -> None:
-        """Mở phiên báo động trên dịch vụ rồi đọc luồng SSE; mỗi báo động thành một sự kiện bus
-        ``dosen_pro_alarm`` (để blueprint/automation bắt, kể cả nút gọi của camera khi biết tên event).
-        Đứt thì nghỉ 30 giây rồi nối lại, để không dồn dập đăng nhập camera."""
+        """Mở phiên báo động (một kết nối riêng tới camera). Sau khi mở được, lõi tự nối lại khi rớt; việc mở lần
+        đầu thất bại (camera từ chối/tắt) thì thưa dần tối đa 10 phút, và LoginGuard còn chặn thêm khi tài khoản bị khoá."""
         wait = 30
         while True:
             try:
                 await self.api.events_start()
-                wait = 30
-                async for ev in self.api.events_stream():
-                    payload = {"entry_id": self.entry.entry_id, "event": ev.get("event"),
-                               "status": (ev.get("alarm") or {}).get("Status"), "alarm": ev.get("alarm"),
-                               "possible_button_press": ev.get("possible_button_press", False)}
-                    self.hass.bus.async_fire(EVENT_ALARM, payload)
-                    for fn in list(self._on_alarm):
-                        fn(payload)
+                return
             except DosenApiError as exc:
-                _LOGGER.debug("alarm stream: %s", exc)
-                wait = min(wait * 2, 600)       # camera từ chối thì thưa dần (tối đa 10 phút), đừng dồn dập đăng nhập
+                _LOGGER.debug("alarm session: %s", exc)
+                wait = min(wait * 2, 600)
             await asyncio.sleep(wait)
 
     @callback
@@ -247,8 +253,21 @@ async def _handle(hass: HomeAssistant, call: ServiceCall) -> None:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    api = DosenApi(async_get_clientsession(hass), entry.data[CONF_URL], entry.data.get(CONF_API_KEY, ""))
-    coord = DosenCoordinator(hass, entry, api)
+    d = entry.data
+    if not d.get(CONF_HOST):
+        raise ConfigEntryError("Cấu hình cũ (kiểu dịch vụ Docker): xoá mục này rồi thêm lại với IP và tài khoản camera")
+    cfg = CamConfig(cam_ip=d[CONF_HOST], cam_port=int(d.get(CONF_PORT, DEFAULT_PORT)), cam_user=d[CONF_USERNAME],
+                    cam_pass=d[CONF_PASSWORD], ffmpeg=get_ffmpeg_manager(hass).binary)
+    holder: dict = {}
+
+    def _bao_dong(record: dict) -> None:                       # chạy trong luồng của lõi → đưa về vòng lặp HA
+        coord_ = holder.get("coord")
+        if coord_ is not None:
+            hass.loop.call_soon_threadsafe(coord_._on_alarm_event, record)
+    camera = Camera(cfg, now=dt_util.now, on_alarm=_bao_dong)
+    camera.start()
+    coord = DosenCoordinator(hass, entry, LocalApi(camera))
+    holder["coord"] = coord
     await coord.async_config_entry_first_refresh()
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coord
     if not hass.services.has_service(DOMAIN, "screen_show"):
@@ -257,9 +276,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 await _handle(_hass, call)
             hass.services.async_register(DOMAIN, name, _svc, schema=schema)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    if entry.options.get(CONF_ALARM_EVENTS, True):
-        entry.async_create_background_task(hass, coord._alarm_loop(), "dosen_pro alarm events")
     coord.alarm_events_on = bool(entry.options.get(CONF_ALARM_EVENTS, True))
+    if coord.alarm_events_on:
+        entry.async_create_background_task(hass, coord._alarm_loop(), "dosen_pro alarm events")
     entry.async_on_unload(entry.add_update_listener(_options_updated))
     entry.async_create_background_task(hass, _apply_default_safe(coord), "dosen_pro default screen")
     return True
@@ -280,7 +299,9 @@ async def _options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if ok:
-        hass.data[DOMAIN].pop(entry.entry_id, None)
+        coord = hass.data[DOMAIN].pop(entry.entry_id, None)
+        if coord is not None:                                   # đóng phiên màn hình, mic, loa, báo động
+            await hass.async_add_executor_job(coord.api.camera.close)
         if not hass.data[DOMAIN]:
             for name in SERVICE_SCHEMAS:
                 hass.services.async_remove(DOMAIN, name)
