@@ -12,6 +12,11 @@ screen_show:
       selector:
         select:
           options: ["off", "hold"]
+    owner:
+      default: "automation"
+      selector: {text: {}}
+    ttl:
+      selector: {number: {min: 1, max: 86400, unit_of_measurement: "s", mode: box}}
     entry_id:
       selector: {text: {}}
 screen_text:
@@ -30,6 +35,29 @@ screen_text:
       selector:
         select:
           options: ["off", "hold"]
+    owner:
+      default: "automation"
+      selector: {text: {}}
+    ttl:
+      selector: {number: {min: 1, max: 86400, unit_of_measurement: "s", mode: box}}
+    entry_id:
+      selector: {text: {}}
+screen_release:
+  fields:
+    owner:
+      required: true
+      selector: {text: {}}
+    entry_id:
+      selector: {text: {}}
+screen_default:
+  fields:
+    mode:
+      required: true
+      selector:
+        select:
+          options: ["off", "clock", "image", "video", "live"]
+    source:
+      selector: {text: {}}
     entry_id:
       selector: {text: {}}
 screen_off:

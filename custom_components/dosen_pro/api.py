@@ -63,13 +63,48 @@ class DosenApi:
     async def speaker_status(self) -> dict[str, Any]:
         return await self._call("GET", "/api/speaker/status")
 
-    async def screen_show(self, source: str, loop: bool = False, after: str = "off") -> dict[str, Any]:
-        return await self._call("POST", "/api/screen/show", {"source": source, "loop": loop, "after": after})
+    async def screen_show(self, source: str, loop: bool = False, after: str = "off",
+                          owner: str = "automation", ttl: float | None = None) -> dict[str, Any]:
+        body = {"source": source, "loop": loop, "after": after, "owner": owner}
+        if ttl:
+            body["ttl"] = ttl
+        return await self._call("POST", "/api/screen/show", body)
 
     async def screen_text(self, title: str, messages: list, font_size: int = 15,
-                          after: str = "hold") -> dict[str, Any]:
-        return await self._call("POST", "/api/screen/text", {
-            "title": title, "messages": messages, "font_size": font_size, "after": after})
+                          after: str = "hold", owner: str = "automation",
+                          ttl: float | None = None) -> dict[str, Any]:
+        body = {"title": title, "messages": messages, "font_size": font_size, "after": after,
+                "owner": owner}
+        if ttl:
+            body["ttl"] = ttl
+        return await self._call("POST", "/api/screen/text", body)
+
+    async def screen_release(self, owner: str) -> dict[str, Any]:
+        return await self._call("POST", "/api/screen/release", {"owner": owner})
+
+    async def screen_default(self, mode: str, source: str = "") -> dict[str, Any]:
+        return await self._call("POST", "/api/screen/default", {"mode": mode, "source": source})
+
+    async def events_start(self) -> dict[str, Any]:
+        return await self._call("POST", "/api/events/start")
+
+    async def events_stream(self):
+        """Luồng SSE các sự kiện báo động của camera (mỗi phần tử là một dict)."""
+        import json as _json
+        try:
+            async with self._session.get(self.url + "/api/events/stream", headers=self._headers,
+                                         timeout=aiohttp.ClientTimeout(total=None, sock_read=60)) as resp:
+                if resp.status >= 400:
+                    raise DosenApiError(f"HTTP {resp.status}")
+                async for raw in resp.content:
+                    line = raw.decode("utf-8", "replace").strip()
+                    if line.startswith("data:"):
+                        try:
+                            yield _json.loads(line[5:].strip())
+                        except ValueError:
+                            continue
+        except (aiohttp.ClientError, TimeoutError) as exc:
+            raise DosenApiError(str(exc)) from exc
 
     async def screen_off(self) -> dict[str, Any]:
         return await self._call("POST", "/api/screen/off")

@@ -1,0 +1,94 @@
+blueprint:
+  name: "Dosen Pro: nút gọi trên camera → nghe hoặc gọi Zalo"
+  description: >-
+    Bấm nút gọi trên camera: nếu đang có cuộc gọi Zalo đến thì **nghe máy**, không thì **gọi Zalo đi**
+    cho người đã chọn. **Lưu ý:** camera Dosen hiện CHƯA thấy báo sự kiện nào qua mạng nội bộ khi bấm
+    nút (đã đo: chỉ báo phát hiện người). Blueprint này bắt sự kiện `dosen_pro_alarm` có tên bạn điền;
+    khi biết camera báo tên gì lúc bấm nút (xem thực thể «Sự kiện camera» hoặc Công cụ nhà phát triển →
+    Sự kiện → nghe `dosen_pro_alarm`) thì điền tên đó vào ô bên dưới.
+  domain: automation
+  author: TriTue2011
+  homeassistant:
+    min_version: 2024.11.0
+  input:
+    ten_event:
+      name: Tên sự kiện của camera khi bấm nút
+      description: "Mặc định LocalAlarm (suy đoán, chưa được xác nhận trên camera)."
+      default: "LocalAlarm"
+      selector:
+        text: {}
+    co_goi_den:
+      name: Công tắc nhớ «đang có cuộc gọi Zalo đến»
+      description: >-
+        Tạo một input_boolean (Cài đặt → Thiết bị và dịch vụ → Trợ giúp). Blueprint tự bật khi có cuộc gọi
+        đến và tắt khi cuộc gọi kết thúc.
+      selector:
+        entity:
+          domain: input_boolean
+    nguoi_nhan:
+      name: Người cần gọi khi bấm nút (mã Zalo)
+      description: "Xem bằng dịch vụ «Xem danh bạ Zalo»."
+      selector:
+        text: {}
+    loai_goi:
+      name: Gọi thoại hay video
+      default: "video"
+      selector:
+        select:
+          options:
+            - {value: video, label: Video}
+            - {value: user, label: Thoại}
+mode: single
+max_exceeded: silent
+trigger:
+  - platform: event
+    event_type: dosen_pro_alarm
+    id: nut
+  - platform: event
+    event_type: zalo_call_call_state
+    id: trang_thai
+variables:
+  ten_event: !input ten_event
+  nguoi_nhan: !input nguoi_nhan
+  ket_thuc: [ended, missed, rejected, declined, no_answer, error]
+action:
+  - choose:
+      # Theo dõi cuộc gọi đến để biết bấm nút là «nghe máy» hay «gọi đi».
+      - conditions: "{{ trigger.id == 'trang_thai' }}"
+        sequence:
+          - choose:
+              - conditions: "{{ trigger.event.data.state == 'incoming' }}"
+                sequence:
+                  - action: input_boolean.turn_on
+                    target:
+                      entity_id: !input co_goi_den
+              - conditions: "{{ trigger.event.data.state in ket_thuc }}"
+                sequence:
+                  - action: input_boolean.turn_off
+                    target:
+                      entity_id: !input co_goi_den
+      # Bấm nút (chỉ tính lúc bắt đầu báo động, không tính lúc kết thúc).
+      - conditions: >-
+          {{ trigger.id == 'nut' and trigger.event.data.event == ten_event
+             and trigger.event.data.status != 'Stop' }}
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: state
+                    entity_id: !input co_goi_den
+                    state: "on"
+                sequence:
+                  - action: zalo_call.answer_voice_call
+              - conditions: "{{ nguoi_nhan != '' }}"
+                sequence:
+                  - action: dosen_pro.screen_text
+                    data:
+                      title: Zalo
+                      owner: zalo_call
+                      ttl: 20
+                      messages:
+                        - {role: caller, text: "Đang gọi…"}
+                  - action: zalo_call.make_call
+                    data:
+                      thread_id: !input nguoi_nhan      # không qua mẫu: mã Zalo dài phải giữ nguyên là chuỗi
+                      type: !input loai_goi

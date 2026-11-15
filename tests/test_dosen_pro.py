@@ -10,7 +10,8 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.dosen_pro.const import CONF_API_KEY, CONF_URL, DOMAIN
 
 URL = "http://dosen.test:8080"
-SCREEN = {"mode": "off", "open": False, "source": "", "after": "off", "size": [240, 320], "last_error": None}
+SCREEN = {"mode": "off", "open": False, "source": "", "size": [240, 320], "last_error": None, "layers": [],
+          "default": {"mode": "clock", "source": ""}}
 SPEAKER = {"playing": False, "source": "", "bytes_sent": 0, "last_error": None}
 
 
@@ -19,8 +20,9 @@ def _mock_api(aioclient_mock, status=200):
     aioclient_mock.get(URL + "/api/status", status=status, json={"service": "x"})
     aioclient_mock.get(URL + "/api/screen/status", json=SCREEN)
     aioclient_mock.get(URL + "/api/speaker/status", json=SPEAKER)
-    for p in ("screen/show", "screen/text", "screen/off", "screen/sleep", "screen/power", "speaker/play",
-              "speaker/play_bytes", "speaker/stop"):
+    aioclient_mock.get(URL + "/api/events/stream", text="")          # luồng báo động rỗng (config flow tạo mục thật)
+    for p in ("screen/show", "screen/text", "screen/off", "screen/sleep", "screen/power", "screen/release",
+              "screen/default", "events/start", "speaker/play", "speaker/play_bytes", "speaker/stop"):
         aioclient_mock.post(URL + "/api/" + p, json={})
 
 
@@ -33,7 +35,8 @@ async def _setup(hass, aioclient_mock, monkeypatch=None):
             return
         monkeypatch.setattr(sat_mod.DosenSatellite, "_chay", _no_loop)
     assert await async_setup_component(hass, "homeassistant", {})       # Assist cần thành phần này
-    entry = MockConfigEntry(domain=DOMAIN, data={CONF_URL: URL, CONF_API_KEY: "k1"}, unique_id=URL)
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_URL: URL, CONF_API_KEY: "k1"}, unique_id=URL,
+                            options={"alarm_events": False})
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
@@ -76,8 +79,17 @@ async def test_services_call_the_api(hass, aioclient_mock):
         "title": "Trợ lý", "messages": [{"role": "user", "text": "Bật đèn"}, "chuỗi thường"]}, blocking=True)
     body = _posts(aioclient_mock, "/api/screen/text")[-1][2]
     assert body["title"] == "Trợ lý" and body["after"] == "hold" and len(body["messages"]) == 2
+    assert body["owner"] == "automation" and "ttl" not in body
     await hass.services.async_call(DOMAIN, "screen_show", {"source": "http://x/clip.mp4", "loop": True}, blocking=True)
-    assert _posts(aioclient_mock, "/api/screen/show")[-1][2] == {"source": "http://x/clip.mp4", "loop": True, "after": "off"}
+    assert _posts(aioclient_mock, "/api/screen/show")[-1][2] == {
+        "source": "http://x/clip.mp4", "loop": True, "after": "off", "owner": "automation"}
+    await hass.services.async_call(DOMAIN, "screen_show", {"source": "rtsp://cam/1", "owner": "chuong", "ttl": 30}, blocking=True)
+    assert _posts(aioclient_mock, "/api/screen/show")[-1][2]["owner"] == "chuong"
+    assert _posts(aioclient_mock, "/api/screen/show")[-1][2]["ttl"] == 30
+    await hass.services.async_call(DOMAIN, "screen_release", {"owner": "chuong"}, blocking=True)
+    assert _posts(aioclient_mock, "/api/screen/release")[-1][2] == {"owner": "chuong"}
+    await hass.services.async_call(DOMAIN, "screen_default", {"mode": "live", "source": "rtsp://cam/2"}, blocking=True)
+    assert _posts(aioclient_mock, "/api/screen/default")[-1][2] == {"mode": "live", "source": "rtsp://cam/2"}
     await hass.services.async_call(DOMAIN, "screen_off", {}, blocking=True)
     assert _posts(aioclient_mock, "/api/screen/off")
     await hass.services.async_call(DOMAIN, "screen_power", {"on": True}, blocking=True)
@@ -131,7 +143,11 @@ async def test_entities_like_the_assist_camera_plus_screen(hass, aioclient_mock,
     for e in ("media_player.dosen_pro_loa", "assist_satellite.dosen_pro", "number.dosen_pro_tang_mic",
               "number.dosen_pro_thoi_gian_sang_man_hinh", "number.dosen_pro_do_sang_man_hinh",
               "switch.dosen_pro_tat_mic", "switch.dosen_pro_nguon_man_hinh",
-              "switch.dosen_pro_hien_hoi_thoai_tren_man_hinh", "sensor.dosen_pro_noi_dung_man_hinh"):
+              "switch.dosen_pro_hien_hoi_thoai_tren_man_hinh", "sensor.dosen_pro_noi_dung_man_hinh",
+              "button.dosen_pro_bat_man_hinh", "button.dosen_pro_tat_man_hinh",
+              "button.dosen_pro_ve_man_hinh_mac_dinh", "button.dosen_pro_dung_loa",
+              "event.dosen_pro_su_kien_camera", "text.dosen_pro_nguon_man_hinh_mac_dinh",
+              "select.dosen_pro_man_hinh_mac_dinh"):
         assert e in ids, (e, sorted(ids))
     assert any(i.startswith("select.dosen_pro") for i in ids)       # pipeline + độ nhạy nói xong
     # Camera không báo nguồn màn hình: trạng thái giả định, HA hiện cả hai nút (không báo «tắt» sai).
@@ -164,6 +180,7 @@ async def test_assist_conversation_is_shown_on_the_camera_screen(hass, aioclient
     await hass.async_block_till_done()
     body = _posts(aioclient_mock, "/api/screen/text")[-1][2]
     assert body["title"] == "Trợ lý" and body["after"] == "hold"
+    assert body["owner"] == "assist" and body["ttl"] == 60                 # lớp riêng của Assist, có hạn
     assert [(m["role"], m["text"]) for m in body["messages"]] == [
         ("user", "bật đèn phòng khách"), ("assistant", "Đã bật đèn.")]       # «Đang nghe…» đã bị thay
     # Tắt công tắc «Hiện hội thoại» thì không vẽ gì nữa.
@@ -172,3 +189,49 @@ async def test_assist_conversation_is_shown_on_the_camera_screen(hass, aioclient
     sat.on_pipeline_event(PipelineEvent(PipelineEventType.STT_END, {"stt_output": {"text": "xin chào"}}))
     await asyncio.sleep(0.4)
     assert len(_posts(aioclient_mock, "/api/screen/text")) == n
+
+
+async def test_buttons_and_default_screen_select(hass, aioclient_mock, monkeypatch):
+    await _setup(hass, aioclient_mock, monkeypatch)
+    for ent, path, expect in (("button.dosen_pro_bat_man_hinh", "/api/screen/power", {"on": True}),
+                              ("button.dosen_pro_tat_man_hinh", "/api/screen/power", {"on": False})):
+        await hass.services.async_call("button", "press", {"entity_id": ent}, blocking=True)
+        assert _posts(aioclient_mock, path)[-1][2] == expect
+    await hass.services.async_call("button", "press", {"entity_id": "button.dosen_pro_ve_man_hinh_mac_dinh"}, blocking=True)
+    assert _posts(aioclient_mock, "/api/screen/off")
+    await hass.services.async_call("button", "press", {"entity_id": "button.dosen_pro_dung_loa"}, blocking=True)
+    assert _posts(aioclient_mock, "/api/speaker/stop")
+    st = hass.states.get("select.dosen_pro_man_hinh_mac_dinh")
+    assert st.state == "clock" and set(st.attributes["options"]) == {"off", "clock", "image", "video", "live"}
+    # live cần nguồn: chưa nhập thì báo lỗi rõ ràng, nhập rồi mới áp dụng (nguồn nằm ở ô «Nguồn màn hình mặc định»)
+    from homeassistant.exceptions import HomeAssistantError
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call("select", "select_option", {"entity_id": "select.dosen_pro_man_hinh_mac_dinh", "option": "live"}, blocking=True)
+    await hass.services.async_call("text", "set_value", {"entity_id": "text.dosen_pro_nguon_man_hinh_mac_dinh", "value": "rtsp://cam/3"}, blocking=True)
+    await hass.services.async_call("select", "select_option", {"entity_id": "select.dosen_pro_man_hinh_mac_dinh", "option": "live"}, blocking=True)
+    assert _posts(aioclient_mock, "/api/screen/default")[-1][2] == {"mode": "live", "source": "rtsp://cam/3"}
+    await hass.services.async_call("select", "select_option", {"entity_id": "select.dosen_pro_man_hinh_mac_dinh", "option": "off"}, blocking=True)
+    assert _posts(aioclient_mock, "/api/screen/default")[-1][2] == {"mode": "off", "source": ""}
+
+
+async def test_camera_alarms_become_bus_events_and_an_event_entity(hass, aioclient_mock, monkeypatch):
+    from custom_components.dosen_pro.api import DosenApi, DosenApiError
+    from custom_components.dosen_pro.const import EVENT_ALARM
+
+    async def fake_stream(self):
+        yield {"event": "LocalAlarm", "alarm": {"Event": "LocalAlarm", "Status": "Start"}, "possible_button_press": True}
+        raise DosenApiError("hết")
+    monkeypatch.setattr(DosenApi, "events_stream", fake_stream)
+    got = []
+    hass.bus.async_listen(EVENT_ALARM, lambda e: got.append(e.data))
+    entry = await _setup(hass, aioclient_mock, monkeypatch)
+    entry.async_create_background_task(hass, hass.data[DOMAIN][entry.entry_id]._alarm_loop(), "test alarm")
+    for _ in range(40):
+        await hass.async_block_till_done()
+        if got:
+            break
+        import asyncio
+        await asyncio.sleep(0.05)
+    assert got and got[0]["event"] == "LocalAlarm" and got[0]["status"] == "Start" and got[0]["possible_button_press"] is True
+    assert hass.states.get("event.dosen_pro_su_kien_camera").attributes["event_type"] == "alarm"
+    assert _posts(aioclient_mock, "/api/events/start")

@@ -13,6 +13,10 @@ MIC_GAIN_MAX = 30
 #: Giữ chữ hội thoại trên màn camera thêm ngần này giây sau khi trả lời xong rồi tắt màn hiển thị.
 CHAT_HOLD_SECONDS = 10
 CHAT_MAX_MESSAGES = 6
+CONF_ALARM_EVENTS = "alarm_events"       # tuỳ chọn: false = không mở luồng sự kiện camera (dùng trong test)
+EVENT_ALARM = "dosen_pro_alarm"           # sự kiện bus HA cho MỌI báo động camera đẩy tới
+DEFAULT_MODES = ["off", "clock", "image", "video", "live"]
+ASSIST_OWNER = "assist"
 
 
 def device_info(entry_id: str) -> dict:

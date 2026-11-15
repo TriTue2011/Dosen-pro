@@ -58,6 +58,33 @@ Dịch vụ `dosen_pro.screen_show`, `screen_text`, `screen_off`, `screen_power`
   data: {media_player_entity_id: media_player.dosen_pro_loa, message: "Có khách ở cửa"}
 ```
 
+## Màn hình: lớp sự kiện và màn hình mặc định
+
+Màn hình camera hoạt động theo **lớp**:
+
+- **Màn hình mặc định** (thực thể `select.dosen_pro_man_hinh_mac_dinh` + ô `text.dosen_pro_nguon_man_hinh_mac_dinh`):
+  `off`, `clock` (đồng hồ), `image` (ảnh), `video` (video lặp), `live` (camera trực tiếp rtsp://). Lưu lại, khởi động lại vẫn giữ.
+- **Sự kiện** (dịch vụ `screen_show`, `screen_text` với `owner` và `ttl`): lớp **gần nhất đè lên**; hết video / hết `ttl` / `screen_release`
+  thì màn hình **về lớp bên dưới**, hết lớp thì về màn hình mặc định. Cùng `owner` thì thay nhau, khác thì xếp chồng.
+- **Assist** tự chiếu hội thoại lên màn (lớp `assist`, mặc định bật, tắt ở `switch.dosen_pro_hien_hoi_thoai_tren_man_hinh`).
+  Việc chiếu video, camera, cuộc gọi Zalo… làm bằng **blueprint** (bên dưới), không cài sẵn trong tích hợp.
+
+Mặc định `off` thì màn hình không bị giữ: dịch vụ chỉ mở phiên hiển thị khi có sự kiện, xong thì đóng. Mặc định khác `off` thì giữ một phiên mở liên tục.
+
+## Blueprint (thư mục `blueprints/automation/dosen_pro/`)
+
+Chép ba tệp vào `/config/blueprints/automation/dosen_pro/` (hoặc nhập qua đường dẫn raw của GitHub).
+
+| Blueprint | Làm gì |
+|---|---|
+| `man_hinh_su_kien.yaml` | Có sự kiện (chuông cửa, phát hiện người…) thì chiếu video / camera trực tiếp / ảnh / chữ lên màn, giữ N giây rồi về mặc định. |
+| `man_hinh_cuoc_goi_zalo.yaml` | Cuộc gọi Zalo đến / đang gọi / đang nói chuyện hiện lên màn (tên người gọi, và hình video nếu điền địa chỉ hình); kết thúc thì gỡ. |
+| `nut_goi_camera_zalo.yaml` | Bấm nút gọi trên camera: có cuộc gọi Zalo đến thì **nghe máy**, không thì **gọi Zalo đi** cho người đã chọn. |
+
+**Nút gọi của camera:** camera chưa báo sự kiện nào qua mạng nội bộ khi bấm nút (đã đo, chỉ có báo phát hiện người), nên blueprint thứ ba
+bắt sự kiện `dosen_pro_alarm` mang tên bạn điền (mặc định `LocalAlarm`, **chưa được xác nhận**). Mọi báo động camera đẩy tới đều thành sự kiện
+`dosen_pro_alarm` và thực thể `event.dosen_pro_su_kien_camera`: bấm nút rồi xem sự kiện nào hiện ra để điền đúng tên.
+
 ## Giới hạn đã biết
 
 - Loa và mic của camera là chất lượng điện thoại (G.711, 8 kHz): nhạc nghe như qua điện thoại.

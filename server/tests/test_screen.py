@@ -160,3 +160,69 @@ def test_speaker_plays_uploaded_wav_bytes(fake_cam_avtalk):
             spk.play_bytes(b"")
     finally:
         spk.stop()
+
+
+# -- lớp sự kiện và màn hình mặc định ------------------------------------------------
+
+def _screen(tmp_path, monkeypatch):
+    monkeypatch.setenv("STATE_DIR", str(tmp_path))
+    return Screen()
+
+
+def test_newest_event_layer_wins_and_release_goes_back_down(fake_cam_avtalk, tmp_path, monkeypatch):
+    scr = _screen(tmp_path, monkeypatch)
+    try:
+        scr.show("lavfi:testsrc=size=160x120:rate=10", after="hold", owner="goi_zalo")
+        scr.show_text("Chuông cửa", ["có người bấm chuông"], owner="chuong")
+        st = scr.status()
+        assert st["mode"] == "text" and [l["owner"] for l in st["layers"]] == ["goi_zalo", "chuong"]
+        scr.show_text("Chuông cửa", ["lần hai"], owner="chuong")            # cùng owner: thay chứ không chồng
+        assert len(scr.status()["layers"]) == 2
+        scr.release("chuong")
+        st = scr.status()
+        assert st["mode"] == "video" and [l["owner"] for l in st["layers"]] == ["goi_zalo"]   # về lớp bên dưới
+        scr.release("khong_co")                                              # không lỗi khi không có
+        scr.release("goi_zalo")
+        assert scr.status()["mode"] == "off" and scr.status()["open"] is False   # hết lớp, mặc định tắt
+    finally:
+        scr.off()
+
+
+def test_layer_ttl_returns_to_the_default_clock_and_default_is_saved(fake_cam_avtalk, tmp_path, monkeypatch):
+    scr = _screen(tmp_path, monkeypatch)
+    scr.load()
+    try:
+        assert scr.set_default("clock")["mode"] == "clock"
+        assert scr.status()["open"] is True
+        scr.show_text("Tin", ["ngắn thôi"], owner="tin", ttl=2)
+        assert scr.status()["mode"] == "text" and scr.status()["layers"][0]["ttl_left"] is not None
+        assert _wait(lambda: scr.status()["mode"] == "clock", 15)             # hết ttl: về đồng hồ
+        assert scr.status()["layers"] == []
+        again = Screen()                                                       # khởi động lại: đọc mặc định đã lưu
+        again.load()
+        assert again.default == {"mode": "clock", "source": ""}
+        assert _wait(lambda: again.status()["mode"] == "clock", 15)            # bộ đếm tự áp dụng mặc định
+        again.set_default("off")
+        again.off()
+    finally:
+        scr.set_default("off")
+        scr.off()
+
+
+def test_default_validation_and_live_needs_a_source(fake_cam_avtalk, tmp_path, monkeypatch):
+    scr = _screen(tmp_path, monkeypatch)
+    for bad in (("rác", ""), ("live", ""), ("image", ""), ("video", "")):
+        with pytest.raises(ValueError):
+            scr.set_default(*bad)
+    with pytest.raises(ValueError):
+        scr.show("x", owner="")
+    with pytest.raises(ValueError):
+        scr.show("x", ttl=0)
+    assert scr.status()["layers"] == []          # lỗi tham số không để lại lớp nào
+
+
+def test_clock_render():
+    from datetime import datetime
+    from app.render import render_clock
+    png = render_clock(datetime(2026, 11, 15, 9, 5))
+    assert png[:8] == b"\x89PNG\r\n\x1a\n" and len(png) > 1000

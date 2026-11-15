@@ -8,12 +8,15 @@ source ends on its own the screen either closes (the camera returns to its
 idle screen) or holds the last frame, per ``after``.
 """
 
+import json
 import logging
 import os
+import re
 import subprocess
 import tempfile
 import threading
 import time
+from datetime import datetime
 
 from . import avtalk, render, video_sender
 from .config import settings
@@ -23,6 +26,7 @@ from .video import redact_source
 log = logging.getLogger("icsee.screen")
 
 _IMAGE_EXT = (".png", ".jpg", ".jpeg", ".bmp", ".webp")
+_DEFAULT_MODES = ("off", "clock", "image", "video", "live")
 
 
 def build_hevc_cmd(source: str, width: int, height: int, fps: int,
@@ -63,13 +67,21 @@ class Screen:
         self._proc: subprocess.Popen | None = None
         self._token = 0                       # bumps on every source switch
         self.width, self.height, self.fps = 240, 320, 10
-        self.mode = "off"                     # off | video | image | text
+        self.mode = "off"                     # what is on the LCD now: off | video | image | text | clock | live
         self.source = ""
-        self.after = "off"
         self.started_at: float | None = None
         self.last_error: str | None = None
         self.switches = 0
         self._tmpdir = tempfile.mkdtemp(prefix="icsee-screen-")
+        # Layers = events, the newest on top wins; when a layer ends the one below (or the default) shows.
+        self._layers: list[dict] = []
+        self.default: dict = {"mode": "off", "source": ""}     # off | clock | image | video | live
+        self._cur_key: tuple | None = None
+        self._cur_layer: dict | None = None
+        self._retry_at = 0.0
+        self._clock_minute = ""
+        self._state_file = os.path.join(os.environ.get("STATE_DIR", "/data"), "screen.json")
+        self._ticker: threading.Thread | None = None
 
     # -- session ---------------------------------------------------------
     def _negotiate(self) -> None:
@@ -191,7 +203,153 @@ class Screen:
         sender = self._sender
         return sender if sender is not None and sender.running else None
 
-    # -- sources ---------------------------------------------------------
+    # -- layers: events on top, the default below --------------------------------
+    @staticmethod
+    def _kind(source: str) -> str:
+        return "image" if source.lower().split("?")[0].endswith(_IMAGE_EXT) else "video"
+
+    def load(self) -> None:
+        """Read the saved default screen and start the background ticker (call once at startup)."""
+        try:
+            with open(self._state_file) as f:
+                d = json.load(f).get("default") or {}
+            if d.get("mode") in _DEFAULT_MODES:
+                self.default = {"mode": d["mode"], "source": str(d.get("source") or "")}
+        except (OSError, ValueError):
+            pass
+        if self._ticker is None:
+            self._ticker = threading.Thread(target=self._tick, daemon=True, name="screen-tick")
+            self._ticker.start()
+
+    def _save(self) -> None:
+        try:
+            os.makedirs(os.path.dirname(self._state_file), exist_ok=True)
+            with open(self._state_file, "w") as f:
+                json.dump({"default": self.default}, f)
+        except OSError as exc:
+            log.warning("man hinh: khong luu duoc cai dat mac dinh: %s", exc)
+
+    def _default_layer(self) -> dict | None:
+        mode, src = self.default["mode"], self.default["source"]
+        if mode == "off":
+            return None
+        if mode == "clock":
+            png = os.path.join(self._tmpdir, "clock.png")
+            now = datetime.now().astimezone()
+            with open(png, "wb") as f:
+                f.write(render.render_clock(now))
+            self._clock_minute = now.strftime("%H%M")
+            return {"owner": "default", "source": png, "mode": "clock", "loop": False, "after": "hold"}
+        if not src:
+            return None
+        return {"owner": "default", "source": src, "mode": mode, "loop": mode == "video",
+                "after": "off"}
+
+    def _apply(self) -> None:
+        """Make the encoder show the top layer (or the default); close the session if nothing is left."""
+        with self._lock:
+            layer = self._layers[-1] if self._layers else self._default_layer()
+            if layer is None:
+                self._stop_encoder()
+                self._close_session()
+                self._cur_key, self._cur_layer = None, None
+                self.mode, self.source = "off", ""
+                return
+            key = (layer["owner"], layer["source"], layer["loop"], layer["mode"])
+            if self._sender is not None and not self._sender.running:
+                self._cur_key = None                  # the AVTalk session died: reopen below
+            if key == self._cur_key and (self._proc is not None or layer.get("ended")):
+                return
+            self._ensure_open()
+            self._stop_encoder()
+            assert self._sender is not None
+            self._sender.reset()
+            cmd = build_hevc_cmd(layer["source"], self.width, self.height, self.fps, layer["loop"])
+            try:
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            except OSError as exc:
+                raise RuntimeError(f"failed to start ffmpeg: {exc}") from exc
+            layer["ended"] = False
+            self._proc, self._cur_key, self._cur_layer = proc, key, layer
+            self.mode, self.source = layer["mode"], layer["source"]
+            self.last_error = None
+            self.switches += 1
+            threading.Thread(target=self._pump, args=(proc, self._token), daemon=True,
+                             name="screen-pump").start()
+            log.info("man hinh: hien %s (%s) lop=%s con %d lop", layer["mode"],
+                     redact_source(layer["source"]), layer["owner"], len(self._layers))
+
+    def show(self, source: str, loop: bool = False, after: str = "off", owner: str = "api",
+             ttl: float | None = None, mode: str | None = None) -> dict:
+        """Push an event layer showing ``source`` (file, URL, rtsp://, image, lavfi:...).
+
+        The newest layer is displayed. A layer ends when its source ends (``after="off"``), when
+        ``ttl`` seconds pass, or on ``release(owner)``; then the layer below, or the default screen,
+        shows again. ``after="hold"`` keeps the last frame until ttl/release. Showing again with the
+        same ``owner`` replaces that owner's layer."""
+        if after not in ("off", "hold"):
+            raise ValueError("after must be 'off' or 'hold'")
+        if ttl is not None and not 0 < ttl <= 86400:
+            raise ValueError("ttl must be 1..86400 seconds")
+        if not isinstance(owner, str) or not owner or len(owner) > 64:
+            raise ValueError("owner must be a short non-empty string")
+        with self._lock:
+            self._layers = [l for l in self._layers if l["owner"] != owner]
+            layer = {"owner": owner, "source": source, "loop": bool(loop), "after": after,
+                     "mode": mode or self._kind(source),
+                     "deadline": time.monotonic() + ttl if ttl else None}
+            self._layers.append(layer)
+            try:
+                self._apply()
+            except Exception:
+                self._layers = [l for l in self._layers if l is not layer]      # never leave a layer that is not shown
+                raise
+        return self.status()
+
+    def show_text(self, title: str = "", messages: list | None = None, font_size: int = 15,
+                  after: str = "hold", owner: str = "api", ttl: float | None = None) -> dict:
+        png = render.render_screen(title, messages, font_size)
+        path = os.path.join(self._tmpdir, "text-%s-%d.png" % (re.sub(r"\W", "_", owner), self.switches + 1))
+        with open(path, "wb") as f:
+            f.write(png)
+        status = self.show(path, after=after, owner=owner, ttl=ttl, mode="text")
+        for old in os.listdir(self._tmpdir):               # keep the newest text image and the clock only
+            if old.startswith("text-") and old != os.path.basename(path) \
+                    and not any(l["source"].endswith(old) for l in self._layers):
+                try:
+                    os.remove(os.path.join(self._tmpdir, old))
+                except OSError:
+                    pass
+        return status
+
+    def release(self, owner: str) -> dict:
+        """End the layer of ``owner`` (no error if it is already gone)."""
+        with self._lock:
+            before = len(self._layers)
+            self._layers = [l for l in self._layers if l["owner"] != owner]
+            if len(self._layers) != before:
+                self._apply()
+        return self.status()
+
+    def off(self) -> dict:
+        """End every layer: the default screen shows (or the screen closes when the default is off)."""
+        with self._lock:
+            self._layers = []
+            self._apply()
+        return self.status()
+
+    def set_default(self, mode: str, source: str = "") -> dict:
+        if mode not in _DEFAULT_MODES:
+            raise ValueError("mode must be one of " + ", ".join(_DEFAULT_MODES))
+        if mode in ("image", "video", "live") and not source:
+            raise ValueError("source is required for image, video and live")
+        with self._lock:
+            self.default = {"mode": mode, "source": source if mode in ("image", "video", "live") else ""}
+            self._save()
+            self._cur_key = None                      # force the encoder to restart on the new default
+            self._apply()
+        return self.status()
+
     def _stop_encoder(self) -> None:
         self._token += 1
         if self._proc is not None:
@@ -200,49 +358,6 @@ class Screen:
             except OSError:
                 pass
             self._proc = None
-
-    def show(self, source: str, loop: bool = False, after: str = "off",
-             mode: str | None = None) -> dict:
-        """Show ``source`` (file, URL, rtsp://, image, lavfi:...) on the LCD."""
-        if after not in ("off", "hold"):
-            raise ValueError("after must be 'off' or 'hold'")
-        with self._lock:
-            self._ensure_open()
-            self._stop_encoder()
-            assert self._sender is not None
-            self._sender.reset()
-            cmd = build_hevc_cmd(source, self.width, self.height, self.fps, loop)
-            try:
-                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                        stderr=subprocess.PIPE)
-            except OSError as exc:
-                raise RuntimeError(f"failed to start ffmpeg: {exc}") from exc
-            self._proc = proc
-            self.mode = mode or ("image" if source.lower().split("?")[0]
-                                 .endswith(_IMAGE_EXT) else "video")
-            self.source, self.after, self.last_error = source, after, None
-            self.switches += 1
-            token = self._token
-            threading.Thread(target=self._pump, args=(proc, token), daemon=True,
-                             name="screen-pump").start()
-            log.info("man hinh: hien %s (%s) after=%s", self.mode,
-                     redact_source(source), after)
-        return self.status()
-
-    def show_text(self, title: str = "", messages: list | None = None,
-                  font_size: int = 15, after: str = "hold") -> dict:
-        png = render.render_screen(title, messages, font_size)
-        path = os.path.join(self._tmpdir, "text-%d.png" % (self.switches + 1))
-        with open(path, "wb") as f:
-            f.write(png)
-        status = self.show(path, after=after, mode="text")
-        for old in os.listdir(self._tmpdir):      # keep only the newest image
-            if old != os.path.basename(path):
-                try:
-                    os.remove(os.path.join(self._tmpdir, old))
-                except OSError:
-                    pass
-        return status
 
     def _pump(self, proc: subprocess.Popen, token: int) -> None:
         splitter = avtalk.HevcSplitter()
@@ -271,27 +386,77 @@ class Screen:
                     self.last_error = redact_source(err.decode("utf-8", "replace").strip())
                     log.warning("man hinh: ffmpeg: %s", self.last_error)
                 self._proc = None
-                if self.after == "off" or self.last_error:
-                    log.info("man hinh: nguon ket thuc, dong")
-                    self._close_session()
-                    self.mode = "off"
+                layer = self._cur_layer
+                if layer is None:
+                    return
+                is_default = layer["owner"] == "default"
+                if is_default and layer["mode"] == "live":
+                    self._retry_at = time.monotonic() + 5       # camera stream dropped: try again soon
+                    self._cur_key = None
+                elif layer["after"] == "off" or (self.last_error and not is_default):
+                    log.info("man hinh: nguon ket thuc (%s), xuong lop duoi", layer["owner"])
+                    self._layers = [l for l in self._layers if l is not layer]
+                    self._cur_key = None
+                    self._apply_quiet()
                 else:
-                    log.info("man hinh: nguon ket thuc, giu khung cuoi")
+                    layer["ended"] = True              # hold: keep the last frame
 
-    def off(self) -> dict:
-        with self._lock:
-            self._stop_encoder()
-            self._close_session()
-            self.mode = "off"
-            log.info("man hinh: tat")
-        return self.status()
+    def _apply_quiet(self) -> None:
+        try:
+            self._apply()
+        except (OSError, DVRIPError, RuntimeError) as exc:
+            self.last_error = f"man hinh: {exc}"
+            log.warning("man hinh: khong ap dung duoc lop ke tiep: %s", exc)
+
+    def _tick(self) -> None:
+        """Once a second: expire layers by ttl; keep the screen alive (apply the default at startup,
+        reopen a dropped session, refresh the clock each minute, retry a dropped live camera).
+        A failure backs off 30 s so a missing or locked camera is not hammered with logins."""
+        backoff_until = 0.0
+        while True:
+            time.sleep(1.0)
+            now = time.monotonic()
+            with self._lock:
+                try:
+                    expired = [l for l in self._layers if l.get("deadline") and now >= l["deadline"]]
+                    if expired:
+                        self._layers = [l for l in self._layers if l not in expired]
+                        self._cur_key = None
+                        self._apply()
+                        continue
+                    if now < backoff_until:
+                        continue
+                    want = bool(self._layers) or self.default["mode"] != "off"
+                    alive = self._sender is not None and self._sender.running
+                    if want and not alive:
+                        self._cur_key = None
+                        self._apply()
+                    elif not self._layers and self.default["mode"] == "clock" \
+                            and datetime.now().strftime("%H%M") != self._clock_minute:
+                        self._cur_key = None
+                        self._apply()
+                    elif not self._layers and self.default["mode"] == "live" \
+                            and self._proc is None and now >= self._retry_at:
+                        self._cur_key = None
+                        self._apply()
+                except (OSError, DVRIPError, RuntimeError) as exc:
+                    self.last_error = f"man hinh: {exc}"
+                    log.warning("man hinh: %s; thu lai sau 30 giay", exc)
+                    backoff_until = now + 30
 
     def status(self) -> dict:
         s = self._sender
+        now = time.monotonic()
         return {"mode": self.mode,
                 "open": bool(s and s.running),
-                "source": redact_source(self.source) if self.mode != "text" else "text",
-                "after": self.after, "size": [self.width, self.height],
+                "source": redact_source(self.source) if self.mode not in ("text", "clock") else self.mode,
+                "default": dict(self.default, source=redact_source(self.default["source"])),
+                "layers": [{"owner": l["owner"], "mode": l["mode"],
+                            "source": redact_source(l["source"]) if l["mode"] not in ("text", "clock") else l["mode"],
+                            "after": l["after"],
+                            "ttl_left": round(l["deadline"] - now, 1) if l.get("deadline") else None}
+                           for l in self._layers],
+                "size": [self.width, self.height],
                 "fps": self.fps, "switches": self.switches,
                 "started_at": self.started_at, "last_error": self.last_error,
                 "sender": s.stats() if s else None}

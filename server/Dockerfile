@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core \
+    && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core tzdata \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -22,7 +22,8 @@ COPY tests ./tests
 # Unit tests gate the build: G.711 codec + DVRIP framing must pass.
 RUN python -m pytest tests/ -q && rm -f /tmp/fake-cam-talk.bin /tmp/fake-cam-avtalk.log
 
-RUN useradd -m -u 10001 icsee && chown -R icsee:icsee /app
+RUN useradd -m -u 10001 icsee && mkdir -p /data && chown -R icsee:icsee /app /data
+VOLUME /data
 USER icsee
 
 EXPOSE 8080

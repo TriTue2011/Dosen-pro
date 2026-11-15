@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import timedelta
 
@@ -15,11 +16,12 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import DosenApi, DosenApiError
-from .const import CONF_API_KEY, CONF_URL, DOMAIN, SCAN_INTERVAL_SECONDS
+from .const import (CONF_ALARM_EVENTS, DEFAULT_MODES, CONF_API_KEY, CONF_URL, DOMAIN, EVENT_ALARM,
+                    SCAN_INTERVAL_SECONDS)
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = [Platform.ASSIST_SATELLITE, Platform.MEDIA_PLAYER, Platform.NUMBER, Platform.SELECT,
-             Platform.SENSOR, Platform.SWITCH]
+PLATFORMS = [Platform.ASSIST_SATELLITE, Platform.BUTTON, Platform.EVENT, Platform.MEDIA_PLAYER,
+             Platform.NUMBER, Platform.SELECT, Platform.SENSOR, Platform.SWITCH, Platform.TEXT]
 
 _MESSAGE = vol.Schema({
     vol.Optional("role", default="info"): vol.In(["user", "assistant", "caller", "info"]),
@@ -31,6 +33,17 @@ SERVICE_SCHEMAS = {
         vol.Required("source"): cv.string,
         vol.Optional("loop", default=False): cv.boolean,
         vol.Optional("after", default="off"): vol.In(["off", "hold"]),
+        vol.Optional("owner", default="automation"): cv.string,
+        vol.Optional("ttl"): vol.All(vol.Coerce(float), vol.Range(min=1, max=86400)),
+    }),
+    "screen_release": vol.Schema({
+        vol.Optional("entry_id"): cv.string,
+        vol.Required("owner"): cv.string,
+    }),
+    "screen_default": vol.Schema({
+        vol.Optional("entry_id"): cv.string,
+        vol.Required("mode"): vol.In(DEFAULT_MODES),
+        vol.Optional("source", default=""): cv.string,
     }),
     "screen_text": vol.Schema({
         vol.Optional("entry_id"): cv.string,
@@ -38,6 +51,8 @@ SERVICE_SCHEMAS = {
         vol.Optional("messages", default=[]): vol.All(cv.ensure_list, [vol.Any(cv.string, _MESSAGE)]),
         vol.Optional("font_size", default=15): vol.All(vol.Coerce(int), vol.Range(min=10, max=30)),
         vol.Optional("after", default="hold"): vol.In(["off", "hold"]),
+        vol.Optional("owner", default="automation"): cv.string,
+        vol.Optional("ttl"): vol.All(vol.Coerce(float), vol.Range(min=1, max=86400)),
     }),
     "screen_off": vol.Schema({vol.Optional("entry_id"): cv.string}),
     "screen_power": vol.Schema({
@@ -68,8 +83,33 @@ class DosenCoordinator(DataUpdateCoordinator):
         self.mic_muted = False
         self.mic_gain_db = 0.0
         self.show_chat = True
+        self.default_source = ""          # nguồn cho màn hình mặc định ảnh/video/live (đặt bởi thực thể text)
+        self._on_alarm: list = []
         self._on_mute: list = []
         self._on_gain: list = []
+
+    @callback
+    def listen_alarm(self, fn):
+        self._on_alarm.append(fn)
+        return lambda: self._on_alarm.remove(fn)
+
+    async def _alarm_loop(self) -> None:
+        """Mở phiên báo động trên dịch vụ rồi đọc luồng SSE; mỗi báo động thành một sự kiện bus
+        ``dosen_pro_alarm`` (để blueprint/automation bắt, kể cả nút gọi của camera khi biết tên event).
+        Đứt thì nghỉ 30 giây rồi nối lại, để không dồn dập đăng nhập camera."""
+        while True:
+            try:
+                await self.api.events_start()
+                async for ev in self.api.events_stream():
+                    payload = {"entry_id": self.entry.entry_id, "event": ev.get("event"),
+                               "status": (ev.get("alarm") or {}).get("Status"), "alarm": ev.get("alarm"),
+                               "possible_button_press": ev.get("possible_button_press", False)}
+                    self.hass.bus.async_fire(EVENT_ALARM, payload)
+                    for fn in list(self._on_alarm):
+                        fn(payload)
+            except DosenApiError as exc:
+                _LOGGER.debug("alarm stream: %s", exc)
+            await asyncio.sleep(30)
 
     @callback
     def set_mic_muted(self, muted: bool) -> None:
@@ -119,9 +159,15 @@ async def _handle(hass: HomeAssistant, call: ServiceCall) -> None:
     api, d = coord.api, call.data
     try:
         if call.service == "screen_show":
-            await api.screen_show(d["source"], d["loop"], d["after"])
+            await api.screen_show(d["source"], d["loop"], d["after"], d["owner"], d.get("ttl"))
         elif call.service == "screen_text":
-            await api.screen_text(d["title"], d["messages"], d["font_size"], d["after"])
+            await api.screen_text(d["title"], d["messages"], d["font_size"], d["after"], d["owner"],
+                                  d.get("ttl"))
+        elif call.service == "screen_release":
+            await api.screen_release(d["owner"])
+        elif call.service == "screen_default":
+            await api.screen_default(d["mode"], d["source"])
+            coord.default_source = d["source"] or coord.default_source
         elif call.service == "screen_off":
             await api.screen_off()
         elif call.service == "screen_power":
@@ -148,6 +194,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 await _handle(_hass, call)
             hass.services.async_register(DOMAIN, name, _svc, schema=schema)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    if entry.options.get(CONF_ALARM_EVENTS, True):
+        entry.async_create_background_task(hass, coord._alarm_loop(), "dosen_pro alarm events")
     return True
 
 

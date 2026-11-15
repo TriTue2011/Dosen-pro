@@ -17,7 +17,7 @@ class DosenScreenMode(CoordinatorEntity, SensorEntity):
     _attr_has_entity_name = True
     _attr_name = "Nội dung màn hình"
     _attr_device_class = SensorDeviceClass.ENUM
-    _attr_options = ["off", "video", "image", "text"]
+    _attr_options = ["off", "video", "image", "text", "clock", "live"]
 
     def __init__(self, coordinator) -> None:
         super().__init__(coordinator)
@@ -31,5 +31,5 @@ class DosenScreenMode(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self):
         s = (self.coordinator.data or {}).get("screen", {})
-        return {"source": s.get("source"), "after": s.get("after"), "size": s.get("size"),
-                "last_error": s.get("last_error")}
+        return {"source": s.get("source"), "size": s.get("size"), "last_error": s.get("last_error"),
+                "layers": s.get("layers"), "default": s.get("default")}

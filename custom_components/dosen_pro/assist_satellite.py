@@ -24,7 +24,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 
 from .api import DosenApiError
-from .const import CHAT_HOLD_SECONDS, CHAT_MAX_MESSAGES, DOMAIN, MIC_CHUNK, MIC_RATE
+from .const import ASSIST_OWNER, CHAT_HOLD_SECONDS, CHAT_MAX_MESSAGES, DOMAIN, MIC_CHUNK, MIC_RATE
 from .entity import DosenEntity
 
 _LOGGER = logging.getLogger(__name__)
@@ -211,7 +211,7 @@ class DosenSatellite(DosenEntity, AssistSatelliteEntity):
         await asyncio.sleep(0.15)
         msgs = [{"role": m["role"], "text": m["text"]} for m in self._chat]
         try:
-            await self._data.api.screen_text("Trợ lý", msgs, after="hold")
+            await self._data.api.screen_text("Trợ lý", msgs, after="hold", owner=ASSIST_OWNER, ttl=60)
         except DosenApiError as exc:
             _LOGGER.warning("%s: cannot show conversation on the screen: %s", self.entity_id, exc)
 
@@ -229,9 +229,7 @@ class DosenSatellite(DosenEntity, AssistSatelliteEntity):
         await asyncio.sleep(CHAT_HOLD_SECONDS)
         self._chat = []
         try:
-            status = await self._data.api.screen_status()
-            if status.get("mode") == "text":
-                await self._data.api.screen_off()
+            await self._data.api.screen_release(ASSIST_OWNER)      # chỉ gỡ lớp của Assist: lớp khác không bị tắt
         except DosenApiError as exc:
             _LOGGER.debug("%s: screen off after conversation failed: %s", self.entity_id, exc)
 

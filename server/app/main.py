@@ -376,13 +376,21 @@ async def _json_body(request: Request) -> dict:
     return body
 
 
+@app.on_event("startup")
+def _startup() -> None:
+    _screen.load()                      # saved default screen + the once-a-second ticker
+
+
 @app.post("/api/screen/show")
 async def screen_show(request: Request) -> Response:
     """Show a source on the camera screen.
 
     Body: {"source": "<file|http(s) URL|rtsp://...|image>", "loop": false,
-    "after": "off"|"hold"}. ``after`` says what happens when the source ends:
-    "off" closes the screen (default), "hold" keeps the last frame.
+    "after": "off"|"hold", "owner": "api", "ttl": seconds}. This pushes an EVENT LAYER: the newest
+    layer is on the screen; when it ends the layer below (or the default screen) shows again.
+    ``after``: "off" = the layer ends when the source ends (default), "hold" = keep the last frame.
+    ``ttl`` ends the layer after that many seconds; ``owner`` names it (a new show with the same
+    owner replaces it; see /api/screen/release).
     """
     try:
         body = await _json_body(request)
@@ -391,7 +399,7 @@ async def screen_show(request: Request) -> Response:
             return _err(400, "bad_source", "field 'source' is required")
         status = await asyncio.to_thread(
             _screen.show, source, bool(body.get("loop", False)),
-            str(body.get("after", "off")))
+            str(body.get("after", "off")), str(body.get("owner", "api")), body.get("ttl"))
     except ValueError as exc:
         return _err(400, "bad_params", str(exc))
     except (OSError, DVRIPError) as exc:
@@ -413,7 +421,8 @@ async def screen_text(request: Request) -> Response:
             return _err(400, "bad_params", "messages must be a list")
         status = await asyncio.to_thread(
             _screen.show_text, str(body.get("title", "")), messages,
-            int(body.get("font_size", 15)), str(body.get("after", "hold")))
+            int(body.get("font_size", 15)), str(body.get("after", "hold")),
+            str(body.get("owner", "api")), body.get("ttl"))
     except (ValueError, TypeError) as exc:
         return _err(400, "bad_params", str(exc))
     except (OSError, DVRIPError) as exc:
@@ -423,8 +432,42 @@ async def screen_text(request: Request) -> Response:
     return JSONResponse(status)
 
 
+@app.post("/api/screen/release")
+async def screen_release(request: Request) -> Response:
+    """End the event layer of one owner: {"owner": "zalo_call"}."""
+    try:
+        body = await _json_body(request)
+        owner = body.get("owner")
+        if not isinstance(owner, str) or not owner:
+            return _err(400, "bad_params", "field 'owner' is required")
+        return JSONResponse(await asyncio.to_thread(_screen.release, owner))
+    except ValueError as exc:
+        return _err(400, "bad_params", str(exc))
+    except (OSError, DVRIPError) as exc:
+        return _err(503, "camera_unreachable", f"screen release failed: {exc}")
+
+
+@app.post("/api/screen/default")
+async def screen_default(request: Request) -> Response:
+    """Set what the screen shows when no event layer is active:
+    {"mode": "off"|"clock"|"image"|"video"|"live", "source": "<url/path, for image|video|live>"}.
+    Saved (STATE_DIR) and applied again after a restart. "off" lets the screen close."""
+    try:
+        body = await _json_body(request)
+        status = await asyncio.to_thread(_screen.set_default, str(body.get("mode", "")),
+                                         str(body.get("source") or ""))
+    except ValueError as exc:
+        return _err(400, "bad_params", str(exc))
+    except (OSError, DVRIPError) as exc:
+        return _err(503, "camera_unreachable", f"screen default failed: {exc}")
+    except RuntimeError as exc:
+        return _err(500, "ffmpeg_failed", str(exc))
+    return JSONResponse(status)
+
+
 @app.post("/api/screen/off")
 async def screen_off() -> dict:
+    """End EVERY event layer: the default screen shows again (or the screen closes if the default is off)."""
     return await asyncio.to_thread(_screen.off)
 
 

@@ -5,7 +5,14 @@ services:
     container_name: dosen-pro
     restart: unless-stopped
     env_file: .env
+    environment:
+      TZ: Asia/Ho_Chi_Minh        # đồng hồ trên màn hình camera
+    volumes:
+      - dosen-data:/data          # lưu màn hình mặc định qua các lần khởi động lại
     ports:
       - "8080:8080"
     # Dịch vụ chỉ nối ra ngoài: camera (DVRIP, cổng 34567) và nguồn video/âm thanh trong LAN.
     # Camera khác mạng con với Docker thì dùng network_mode: host.
+
+volumes:
+  dosen-data:

@@ -114,3 +114,20 @@ def render_screen(title: str = "", messages: list | None = None,
     buf = io.BytesIO()
     img.save(buf, "PNG")
     return buf.getvalue()
+
+
+_DAYS = ("Thứ hai", "Thứ ba", "Thứ tư", "Thứ năm", "Thứ sáu", "Thứ bảy", "Chủ nhật")
+
+
+def render_clock(now) -> bytes:
+    """PNG (240x320) of a clock face: big HH:MM, weekday and date in Vietnamese."""
+    img = Image.new("RGB", (WIDTH, HEIGHT), BG)
+    d = ImageDraw.Draw(img)
+    big, mid = _font(64, bold=True), _font(20)
+    t = now.strftime("%H:%M")
+    d.text(((WIDTH - d.textlength(t, font=big)) / 2, 96), t, font=big, fill=(235, 240, 250))
+    line = f"{_DAYS[now.weekday()]}, {now.strftime('%d/%m/%Y')}"
+    d.text(((WIDTH - d.textlength(line, font=mid)) / 2, 190), line, font=mid, fill=(150, 170, 200))
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()
