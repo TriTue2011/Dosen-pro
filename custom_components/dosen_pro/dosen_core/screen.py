@@ -412,11 +412,15 @@ class Screen:
         return status
 
     def show_card(self, title: str = "", value: str = "", caption: str = "", rows: list | None = None,
-                  color: str = "red", after: str = "hold", owner: str = "api", ttl: float | None = None) -> dict:
+                  color: str = "red", after: str = "hold", owner: str = "api", ttl: float | None = None,
+                  theme: str = "light", layout: str = "list", title_color: str | None = None) -> dict:
         """Thẻ thông tin (số lớn + các dòng nhãn–giá trị): vẽ rồi hiện như một lớp sự kiện (xem ``render.render_card``)."""
-        if color not in render.CARD_COLORS:
-            raise ValueError("color must be one of " + ", ".join(render.CARD_COLORS))
-        png = render.render_card(title, value, caption, rows, color)
+        if theme not in render.CARD_THEMES or layout not in render.CARD_LAYOUTS:
+            raise ValueError("theme must be light|dark and layout list|tiles")
+        colours = [color, title_color, *[r.get("color") for r in (rows or [])]]
+        if not all(c is None or render.valid_color(c) for c in colours):
+            raise ValueError("color must be one of " + ", ".join(render.CARD_COLORS) + " or #rrggbb")
+        png = render.render_card(title, value, caption, rows, color, theme, layout, title_color)
         path = os.path.join(self._tmpdir, "text-%s-%d.png" % (re.sub(r"\W", "_", owner), self.switches + 1))
         with open(path, "wb") as f:
             f.write(png)

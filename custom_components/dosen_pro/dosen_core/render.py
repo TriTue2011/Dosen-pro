@@ -280,7 +280,36 @@ def render_clock(now, weather: dict | None = None) -> bytes:
 # ── Thẻ thông tin tự chế: số lớn + các dòng nhãn–giá trị (cùng kiểu với đồng hồ) ─────────────────────────────
 
 CARD_COLORS = {"black": INK, "red": RED, "blue": (0, 90, 200), "green": (0, 130, 50), "orange": (225, 110, 0)}
-CARD_MAX_ROWS_WITH_VALUE, CARD_MAX_ROWS = 6, 8
+CARD_THEMES = ("light", "dark")
+CARD_LAYOUTS = ("list", "tiles")
+HEX_COLOR = r"^#[0-9a-fA-F]{6}$"
+CARD_MAX_ROWS_WITH_VALUE, CARD_MAX_ROWS, CARD_MAX_TILES = 6, 8, 6
+
+# Bảng màu theo giao diện: nền, chữ, đường kẻ, đường kẻ mờ, và màu tên (đỏ/xanh…) — giao diện tối dùng màu sáng hơn để nổi trên nền đen.
+_THEME = {
+    "light": {"bg": CLOCK_BG, "ink": INK, "rule": RULE, "soft": (200, 200, 194),
+              "named": CARD_COLORS},
+    "dark": {"bg": (14, 18, 26), "ink": (242, 246, 252), "rule": (150, 160, 176), "soft": (58, 64, 78),
+             "named": {"black": (242, 246, 252), "red": (255, 92, 92), "blue": (110, 172, 255), "green": (84, 222, 124),
+                       "orange": (255, 170, 64)}},
+}
+
+
+def valid_color(value) -> bool:
+    """Tên trong bảng màu hoặc ``#rrggbb``."""
+    import re
+    return isinstance(value, str) and (value in CARD_COLORS or re.match(HEX_COLOR, value) is not None)
+
+
+def resolve_color(value, theme: str = "light", default: str = "black") -> tuple:
+    """Tên trong bảng màu hoặc ``#rrggbb`` → RGB; không hiểu thì màu ``default``. Giao diện tối dùng bản sáng của các màu tên."""
+    named = _THEME.get(theme, _THEME["light"])["named"]
+    if isinstance(value, str) and len(value) == 7 and value.startswith("#"):
+        try:
+            return tuple(int(value[k:k + 2], 16) for k in (1, 3, 5))
+        except ValueError:
+            pass
+    return named.get(value, named[default])
 
 
 def _fit_font(d, text: str, max_w: int, size: int, min_size: int = 11, bold: bool = False):
@@ -296,48 +325,83 @@ def _fit_font(d, text: str, max_w: int, size: int, min_size: int = 11, bold: boo
     return text, f
 
 
-def render_card(title: str = "", value: str = "", caption: str = "", rows: list | None = None,
-                color: str = "red") -> bytes:
+def render_card(title: str = "", value: str = "", caption: str = "", rows: list | None = None, color: str = "red",
+                theme: str = "light", layout: str = "list", title_color: str | None = None) -> bytes:
     """PNG 240x320: tiêu đề, MỘT SỐ LỚN (``value``) kèm nhãn (``caption``), rồi các dòng ``{label, value, color?}``.
 
-    Ai cũng dùng được cho điện năng, nhiệt độ, cảm biến…: chỉ khai dữ liệu, bố cục tự lo. Nhiều dòng quá thì bỏ bớt cuối;
-    chữ dài tự thu nhỏ rồi cắt. Chữ đen, số màu (``CARD_COLORS``) — cùng bảng màu với đồng hồ."""
-    colour = CARD_COLORS.get(color, RED)
-    img = Image.new("RGB", (WIDTH, HEIGHT), CLOCK_BG)
+    ``theme`` sáng/tối; ``layout`` ``list`` (số lớn + danh sách) hoặc ``tiles`` (lưới 2 cột, mỗi ô nhãn nhỏ + số to). Màu là tên trong
+    ``CARD_COLORS`` hoặc ``#rrggbb``. Ai cũng dùng được cho điện năng, nhiệt độ, cảm biến…: chỉ khai dữ liệu, bố cục tự lo. Nhiều dòng quá
+    thì bỏ bớt cuối; chữ dài tự thu nhỏ rồi cắt."""
+    th = _THEME.get(theme, _THEME["light"])
+    ink, rule, soft = th["ink"], th["rule"], th["soft"]
+    accent = resolve_color(color, theme, "red")
+    img = Image.new("RGB", (WIDTH, HEIGHT), th["bg"])
     d = ImageDraw.Draw(img)
     y = 8
     if title:
         text, f = _fit_font(d, str(title), WIDTH - 16, 19, 12, True)
-        _centered(d, text, f, WIDTH / 2, y, INK)
+        _centered(d, text, f, WIDTH / 2, y, resolve_color(title_color, theme, "black") if title_color else ink)
         y += 30
-        d.line([8, y, WIDTH - 8, y], fill=RULE, width=1)
+        d.line([8, y, WIDTH - 8, y], fill=rule, width=1)
         y += 8
-    if value:
-        text, f = _fit_font(d, str(value), WIDTH - 16, 58, 24, True)
-        _centered(d, text, f, WIDTH / 2, y, colour)
-        y += int(f.size * 1.2) + 2
-        if caption:
-            text, f = _fit_font(d, str(caption), WIDTH - 16, 16, 11, True)
-            _centered(d, text, f, WIDTH / 2, y, INK)
-            y += 24
-        y += 6
-    rows = list(rows or [])[:CARD_MAX_ROWS_WITH_VALUE if value else CARD_MAX_ROWS]
-    if rows:
-        if value or not title:                                # đã có đường kẻ dưới tiêu đề thì không kẻ đôi
-            d.line([8, y, WIDTH - 8, y], fill=RULE, width=1)
-        y += 4
-        roomy = not value and len(rows) <= 5                  # ít dòng, không có số lớn: chữ to, dòng cao cho đỡ trống
-        vsize, lsize, step_max = (22, 20, 56) if roomy else (17, 15, 34)
-        step = min(step_max, (HEIGHT - 8 - y) // len(rows))
-        for r in rows:
-            vtext, vfont = _fit_font(d, str(r.get("value", "")), 116 if roomy else 108, vsize, 11, True)
-            vw = d.textlength(vtext, font=vfont)
-            ltext, lfont = _fit_font(d, str(r.get("label", "")), WIDTH - 24 - int(vw) - 8, lsize, 11)
-            ty = y + (step - int(vsize * 1.2)) // 2
-            d.text((10, ty), ltext, font=lfont, fill=INK)
-            d.text((WIDTH - 10 - vw, ty), vtext, font=vfont, fill=CARD_COLORS.get(r.get("color"), INK))
-            y += step
-            d.line([8, y, WIDTH - 8, y], fill=(200, 200, 194), width=1)
+    rows = list(rows or [])
+    if layout == "tiles":
+        _draw_tiles(d, rows, value, caption, accent, theme, y)
+    else:
+        _draw_list(d, rows, value, caption, accent, theme, y, bool(title))
     buf = io.BytesIO()
     img.save(buf, "PNG")
     return buf.getvalue()
+
+
+def _draw_list(d, rows, value, caption, accent, theme, y, has_title):
+    th = _THEME[theme]
+    ink, rule, soft = th["ink"], th["rule"], th["soft"]
+    if value:
+        text, f = _fit_font(d, str(value), WIDTH - 16, 58, 24, True)
+        _centered(d, text, f, WIDTH / 2, y, accent)
+        y += int(f.size * 1.2) + 2
+        if caption:
+            text, f = _fit_font(d, str(caption), WIDTH - 16, 16, 11, True)
+            _centered(d, text, f, WIDTH / 2, y, ink)
+            y += 24
+        y += 6
+    rows = rows[:CARD_MAX_ROWS_WITH_VALUE if value else CARD_MAX_ROWS]
+    if not rows:
+        return
+    if value or not has_title:                                # đã có đường kẻ dưới tiêu đề thì không kẻ đôi
+        d.line([8, y, WIDTH - 8, y], fill=rule, width=1)
+    y += 4
+    roomy = not value and len(rows) <= 5                      # ít dòng, không có số lớn: chữ to, dòng cao cho đỡ trống
+    vsize, lsize, step_max = (22, 20, 56) if roomy else (17, 15, 34)
+    step = min(step_max, (HEIGHT - 8 - y) // len(rows))
+    for r in rows:
+        vtext, vfont = _fit_font(d, str(r.get("value", "")), 116 if roomy else 108, vsize, 11, True)
+        vw = d.textlength(vtext, font=vfont)
+        ltext, lfont = _fit_font(d, str(r.get("label", "")), WIDTH - 24 - int(vw) - 8, lsize, 11)
+        ty = y + (step - int(vsize * 1.2)) // 2
+        d.text((10, ty), ltext, font=lfont, fill=ink)
+        d.text((WIDTH - 10 - vw, ty), vtext, font=vfont, fill=resolve_color(r.get("color"), theme, "black"))
+        y += step
+        d.line([8, y, WIDTH - 8, y], fill=soft, width=1)
+
+
+def _draw_tiles(d, rows, value, caption, accent, theme, y):
+    """Lưới 2 cột: mỗi ô nhãn nhỏ phía trên, số to có màu phía dưới. ``value`` (nếu có) là ô đầu tiên."""
+    th = _THEME[theme]
+    ink, soft = th["ink"], th["soft"]
+    tiles = ([{"label": caption, "value": value, "color": None, "main": True}] if value else []) + rows
+    tiles = tiles[:CARD_MAX_TILES]
+    if not tiles:
+        return
+    n_rows = (len(tiles) + 1) // 2
+    cell_h = min(110, (HEIGHT - 8 - y) // n_rows)
+    cell_w = (WIDTH - 16) // 2
+    for k, t in enumerate(tiles):
+        cx, cy = 8 + (k % 2) * cell_w, y + (k // 2) * cell_h
+        d.rectangle([cx + 3, cy + 3, cx + cell_w - 3, cy + cell_h - 3], outline=soft, width=1)
+        label, f = _fit_font(d, str(t.get("label", "")), cell_w - 14, 14, 10)
+        _centered(d, label, f, cx + cell_w / 2, cy + 8, ink)
+        colour = accent if t.get("main") and not t.get("color") else resolve_color(t.get("color"), theme, "black")
+        vtext, vf = _fit_font(d, str(t.get("value", "")), cell_w - 14, 32, 12, True)
+        _centered(d, vtext, vf, cx + cell_w / 2, cy + 8 + 22 + max(0, (cell_h - 8 - 22 - int(vf.size * 1.2) - 8) // 2), colour)

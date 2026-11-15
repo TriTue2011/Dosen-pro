@@ -64,7 +64,8 @@ class LocalApi:
     async def screen_card(self, card: dict, after: str = "hold", owner: str = "automation",
                           ttl: float | None = None) -> dict[str, Any]:
         return await self._run(self.camera.screen.show_card, card["title"], card["value"], card["caption"], card["rows"],
-                               card["color"], after, owner, ttl)
+                               card["color"], after, owner, ttl, card.get("theme", "light"), card.get("layout", "list"),
+                               card.get("title_color"))
 
     async def screen_release(self, owner: str) -> dict[str, Any]:
         return await self._run(self.camera.screen.release, owner)
@@ -87,6 +88,10 @@ class LocalApi:
 
     async def screen_power(self, on: bool) -> dict[str, Any]:
         return await self._run(self.camera.screen.power, on)
+
+    async def screen_sleep_get(self) -> dict[str, Any]:
+        """Thời gian sáng (giây, 0 = không tắt) và độ sáng (1–100) đang đặt trên camera."""
+        return await self._run(self.camera.screen.get_sleep)
 
     async def screen_sleep(self, seconds: int | None = None, luminance: int | None = None) -> dict[str, Any]:
         return await self._run(self.camera.screen.set_sleep, seconds, luminance)

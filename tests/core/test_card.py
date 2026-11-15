@@ -42,8 +42,10 @@ def test_rows_only_card_fits_eight_rows_inside_the_screen():
 def test_show_card_validates_color_and_shows_a_text_layer(cfg):
     scr = Screen(cfg)
     try:
-        with pytest.raises(ValueError):
-            scr.show_card("t", "1", color="tim")
+        for bad in ({"color": "tim"}, {"color": "#12345"}, {"title_color": "xanh"}, {"rows": [{"label": "a", "value": "b", "color": "tim"}]},
+                    {"theme": "hong"}, {"layout": "luoi"}):
+            with pytest.raises(ValueError):
+                scr.show_card("t", "1", **bad)
         assert scr.status()["layers"] == []
     finally:
         scr.close()

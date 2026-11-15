@@ -31,9 +31,10 @@ class FakeScreen:
         self.calls.append(("clock", {"after": after, "owner": owner, "ttl": ttl}))
         return self._status
 
-    def show_card(self, title, value, caption, rows, color, after, owner, ttl):
+    def show_card(self, title, value, caption, rows, color, after, owner, ttl, theme="light", layout="list", title_color=None):
         self.calls.append(("card", {"title": title, "value": value, "caption": caption, "rows": rows, "color": color,
-                                    "after": after, "owner": owner, "ttl": ttl}))
+                                    "after": after, "owner": owner, "ttl": ttl, "theme": theme, "layout": layout,
+                                    "title_color": title_color}))
         return self._status
 
     def release(self, owner):
@@ -69,6 +70,9 @@ class FakeScreen:
     def set_sleep(self, seconds, luminance):
         self.calls.append(("sleep", {"seconds": seconds, "luminance": luminance}))
         return {}
+
+    def get_sleep(self):
+        return {"work_mode": "Timing", "work_time": 0, "luminance": 100}
 
 
 class FakeStream:

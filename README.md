@@ -39,6 +39,8 @@ trực tiếp với camera qua giao thức DVRIP (cổng 34567), dùng ffmpeg v�
 
 ## Thực thể
 
+Cài đặt **hiển thị của màn hình** (màn mặc định, thời tiết, xoay, chất lượng, luân phiên, thẻ thông tin, độ sáng…) **không còn là thực thể**: tất cả nằm trong **một thẻ «Màn hình Dosen»** (xem mục dưới). Thiết bị chỉ còn các thực thể điều khiển và theo dõi:
+
 | Thực thể | Làm gì |
 |---|---|
 | `assist_satellite.dosen_pro` | Nghe mic camera, chạy pipeline Assist (từ khoá → nhận giọng → hiểu lệnh → trả lời), đọc câu trả lời ra loa. |
@@ -50,19 +52,32 @@ trực tiếp với camera qua giao thức DVRIP (cổng 34567), dùng ffmpeg v�
 | `switch.dosen_pro_chong_on_mic_camera` | Chống ồn của mic camera. |
 | `switch.dosen_pro_tieng_bip_khi_nhan_nut` | Tiếng bíp khi bấm phím trên thân camera (`KeyAudioTip`). |
 | `switch.dosen_pro_tat_mic` | Tắt nghe (loa và màn hình vẫn chạy). |
-| `switch.dosen_pro_hien_hoi_thoai_tren_man_hinh` | Bật/tắt việc hiện hội thoại Assist lên màn. |
-| `switch.dosen_pro_luan_phien_man_hinh` | Bật/tắt màn luân phiên (trang đặt bằng `screen_carousel`). |
-| `select.dosen_pro_man_hinh_mac_dinh` | Loại màn hình mặc định: tắt, đồng hồ, ảnh, video lặp, camera trực tiếp. |
-| `select.dosen_pro_camera_mac_dinh`, `select.dosen_pro_anh_mac_dinh`, `text.dosen_pro_dia_chi_mac_dinh` | Nguồn của màn mặc định: chọn **theo danh sách camera / ảnh của HA**, hoặc gõ địa chỉ. |
-| `select.dosen_pro_thoi_tiet_tren_dong_ho` | Thực thể `weather.*` hiện trên đồng hồ. |
-| `select.dosen_pro_xoay_hinh_mac_dinh`, `select.dosen_pro_kieu_khung_hinh_mac_dinh` | Xoay hình 0/90/180/270° và «vừa khung / lấp đầy» (chỉ cho màn mặc định). |
-| `select.dosen_pro_chat_luong_hinh_tren_man` | Chất lượng mã hoá hình lên màn: Chuẩn / Cao / Cao nhất (thử). |
 | `button.dosen_pro_bat_man_hinh`, `button.dosen_pro_tat_man_hinh` | Bật / tắt nguồn màn hình camera. |
 | `button.dosen_pro_ve_man_hinh_mac_dinh`, `button.dosen_pro_dung_loa` | Gỡ mọi lớp sự kiện về màn mặc định; dừng loa. |
-| `number.dosen_pro_thoi_gian_sang_man_hinh`, `number.dosen_pro_do_sang_man_hinh` | Thời gian màn sáng (0 = không tắt) và độ sáng 1–100%. |
 | `sensor.dosen_pro_noi_dung_man_hinh` | Màn đang chiếu gì: `off`, `clock`, `image`, `video`, `live`, `text`. |
 | `sensor.dosen_pro_muc_mic` | Mức tiếng mic (dBFS) đang đưa vào Assist, để chỉnh «Tăng mic». |
 | `event.dosen_pro_su_kien_camera` | Mọi báo động camera đẩy tới (xem *Nút gọi*). |
+
+## Thẻ «Màn hình Dosen»: toàn bộ cài đặt hiển thị ở một chỗ
+
+Cài tích hợp là **tự có thẻ**, không phải thêm tài nguyên hay chép tệp JS:
+
+- **Thanh bên → «Màn hình Dosen»** (chỉ quản trị viên), hoặc
+- trong bảng điều khiển: *Thêm thẻ* → **Màn hình Dosen** (`type: custom:dosen-pro-card`).
+
+Thẻ có bốn phần, và **bản xem trước bên trái vẽ đúng hình sẽ lên màn camera bằng số liệu thật của HA**:
+
+| Phần | Làm được gì |
+|---|---|
+| **Màn hình mặc định** | Loại (tắt, đồng hồ, ảnh, video, camera trực tiếp), nguồn (chọn camera / ảnh theo danh sách thực thể, hoặc gõ địa chỉ), thời tiết trên đồng hồ, xoay hình, kiểu khung, chất lượng hình. |
+| **Luân phiên các màn** | Bật/tắt, **bao nhiêu giây mỗi màn**, **thẻ nào tham gia** (tích ô vuông), đổi thứ tự (↑↓), thêm / sửa / xoá thẻ. |
+| **Trình soạn thẻ** | Tên thẻ; thẻ thông tin: tiêu đề, **cảm biến chính** (số lớn), **các dòng** (chọn thực thể, đặt tên hiển thị, màu từng dòng, đổi vị trí ↑↓), **màu** số lớn và tiêu đề (bảng màu hoặc màu tuỳ ý), giao diện **sáng/tối**, bố cục **danh sách** hoặc **lưới 2 cột**; thẻ camera / ảnh / đồng hồ. Mọi thay đổi hiện ngay ở bản xem trước. |
+| **Màn hình camera** | Độ sáng, thời gian màn sáng, hiện hội thoại Assist, bật / tắt màn. |
+
+«**Gửi thử lên màn (30 giây)**» hiện thẻ đang xem lên màn camera thật rồi tự về như cũ. Cài đặt được lưu, khởi động lại HA vẫn giữ.
+
+Mọi thứ thẻ làm đều là API WebSocket `dosen_pro/*` (chỉ quản trị viên): `state`, `set`, `card_save`, `card_delete`, `card_move`, `rotation`, `preview`, `show_now`, `screen_info`, `screen_set`.
+Các dịch vụ `screen_card`, `screen_carousel`… vẫn dùng được cho automation.
 
 ## Màn hình
 
@@ -92,6 +107,8 @@ Bố cục dọc 240×320, vẽ lại mỗi phút và mỗi khi thời tiết đ
 Trung thu và Giỗ Tổ 2026, tháng nhuận 2025.
 
 ### Xoay hình và chất lượng
+
+Đặt ở phần **Màn hình mặc định** của thẻ:
 
 - **Xoay hình / kiểu khung** chỉ áp cho **màn hình mặc định** (ảnh, video, camera trực tiếp): xoay 90° để hình ngang vừa màn dọc,
   «lấp đầy» để cắt rìa thay vì chừa viền đen.
@@ -123,6 +140,8 @@ Dosen cung cấp đủ ba thứ cho tích hợp **Zalo Calling**:
 > Phía Zalo Calling cần bản có hỗ trợ Dosen làm mic/loa; bản đó chưa có trong kho Zalo Calling công khai tại thời điểm phát hành này.
 
 ## Tự chế thông tin trên màn: thẻ thông tin
+
+> Cách dễ nhất: thêm thẻ thông tin trong **thẻ «Màn hình Dosen»** (chọn thực thể, đặt tên, màu, xem trước ngay). Phần dưới là cách dùng bằng dịch vụ trong automation.
 
 Muốn hiện **điện năng lượng mặt trời, nhiệt độ các phòng, cảm biến cửa, pin…** lên màn camera? Dịch vụ `dosen_pro.screen_card` vẽ một **thẻ**
 cùng kiểu với đồng hồ (chữ đen, số màu): tiêu đề, **một số lớn** và tối đa 6 dòng *nhãn – giá trị* (8 dòng nếu không có số lớn).
@@ -171,14 +190,16 @@ thư mục `blueprints/automation/dosen_pro/`; không phải sửa mã Python. M
 
 ## Màn luân phiên: tự đổi giữa nhiều màn
 
+> Cách dễ nhất: **thẻ «Màn hình Dosen» → Luân phiên các màn**: tích thẻ nào tham gia, đặt số giây, đổi thứ tự, bật. Phần dưới là cách dùng bằng dịch vụ.
+
 Muốn màn camera **tự đổi lần lượt** giữa vài màn (ví dụ đồng hồ → điện mặt trời → camera cửa)? Dùng dịch vụ `dosen_pro.screen_carousel`:
-khai danh sách **trang** và số giây mỗi trang, rồi bật. Công tắc `switch.dosen_pro_luan_phien_man_hinh` bật/tắt về sau; danh sách trang và
+khai danh sách **trang** và số giây mỗi trang, rồi bật. Bật/tắt về sau ở thẻ «Màn hình Dosen»; danh sách thẻ và
 trạng thái bật được **lưu**, khởi động lại HA vẫn chạy tiếp.
 
 ```yaml
 - action: dosen_pro.screen_carousel
   data:
-    seconds: 20                       # thời lượng mặc định mỗi trang (3–3600 giây); đổi sau ở number.dosen_pro_thoi_gian_moi_man_luan_phien
+    seconds: 20                       # thời lượng mặc định mỗi trang (3–3600 giây); đổi sau ở thẻ «Màn hình Dosen»
     pages:
       - {type: clock, seconds: 20}    # đồng hồ đầy đủ (tự cập nhật khi sang phút mới)
       - type: card                    # thẻ thông tin: cùng trường với screen_card
@@ -200,7 +221,7 @@ Tắt: `dosen_pro.screen_carousel` với `enabled: false` (hoặc tắt công t�
 | `video` | `source` hoặc `media`, `loop` (mặc định lặp) |
 | `camera` | `camera_entity` hoặc `source` (rtsp://…) |
 
-Thời lượng mặc định mỗi màn là **20 giây**, chỉnh được ngay ở `number.dosen_pro_thoi_gian_moi_man_luan_phien` (áp dụng từ màn kế tiếp, được nhớ qua khởi động lại). Trang nào có `seconds` riêng thì giữ riêng. Tối đa 12 trang. Cách hoạt động:
+Thời lượng mặc định mỗi màn là **20 giây**, chỉnh ở thẻ «Màn hình Dosen» (áp dụng từ màn kế tiếp, được nhớ qua khởi động lại). Trang nào có `seconds` riêng thì giữ riêng. Tối đa 12 trang. Cách hoạt động:
 
 - Mỗi trang là một **lớp** của chủ `carousel`, nằm **dưới** mọi lớp sự kiện: cuộc gọi Zalo, chuông cửa, hội thoại Assist… vẫn đè lên;
   hết sự kiện thì trang đang tới lượt hiện lại.
@@ -259,12 +280,12 @@ công tắc «Tiếng bíp khi nhấn nút» chỉ điều khiển `KeyAudioTip`
 | Triệu chứng | Cách xử lý |
 |---|---|
 | Màn **đen / chập chờn** | Nguyên nhân thường gặp là khung hình quá lớn (≥ ~9,7 KB). Đặt «Chất lượng hình trên màn» về **Chuẩn**; kiểm `sensor.dosen_pro_noi_dung_man_hinh` có `last_error`; đừng tự đổi bộ mã hoá. |
+| Không thấy thẻ **«Màn hình Dosen»** (thanh bên hoặc danh sách thẻ) | Cần **khởi động lại HA** sau khi cài/cập nhật, rồi làm mới cứng trình duyệt (Ctrl+F5). Thẻ chỉ dành cho quản trị viên. |
 | Không thấy **icon** | Icon nằm ở `custom_components/dosen_pro/brand/` (cần HA 2026.3 trở lên): **khởi động lại HA** rồi làm mới cứng trình duyệt (Ctrl+F5) vì giao diện giữ biểu tượng mặc định trong bộ nhớ đệm. HACS lấy biểu tượng từ kho riêng của nó nên danh sách HACS có thể vẫn hiện biểu tượng mặc định. |
 | Log «camera refused AVTalk claim: Ret=503» | Camera còn giữ phiên hiển thị cũ hoặc app khác đang mở màn; tự thử lại, thường hết sau vài giây. |
 | Đăng nhập báo **Ret 205 / tài khoản bị khoá** | Đợi camera mở khoá (hoặc khởi động lại camera), kiểm đúng tên tài khoản; dùng tài khoản riêng. |
 | Vừa cập nhật mà không thấy thực thể mới | **Khởi động lại HA** (không chỉ *Tải lại*). |
 | Assist nghe sai | Hạ «Tăng mic» về 0–6 dB; xem `/config/dosen_pro_stt/last.txt` (có bị cắt đỉnh không). |
-| Màn không bật khi chiếu | Màn chỉ hiện khi sáng: kiểm `number.dosen_pro_thoi_gian_sang_man_hinh` và nút bật màn. |
 
 ## Giới hạn đã biết
 

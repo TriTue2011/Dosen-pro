@@ -21,22 +21,7 @@ from custom_components.dosen_pro.dosen_core.dvrip import DVRIPError
 DATA = {CONF_HOST: "192.168.1.50", CONF_PORT: 34567, CONF_USERNAME: "admin", CONF_PASSWORD: "mk"}
 
 
-_REAL: dict = {}
-
-
-@pytest.fixture(autouse=True)
-def _fake_camera(monkeypatch):
-    FakeCamera.instances.clear()
-    FakeCamera.login_error = None
-    monkeypatch.setattr(pkg, "Camera", FakeCamera)
-    monkeypatch.setattr(cflow, "Camera", FakeCamera)
-
-    from custom_components.dosen_pro import assist_satellite as sat_mod
-
-    async def _no_loop(self):                  # không mở ffmpeg/pipeline thật trong test
-        return
-    _REAL.setdefault("chay", sat_mod.DosenSatellite._chay)          # test cần vòng nghe thật thì lấy lại từ đây
-    monkeypatch.setattr(sat_mod.DosenSatellite, "_chay", _no_loop)
+from conftest import _REAL  # noqa: E402  (fixture camera giả nằm ở conftest.py, dùng chung với test_panel.py)
 
 
 async def _setup(hass, options=None, data=None, entry_id=None):
@@ -175,25 +160,24 @@ async def test_entities_like_the_assist_camera_plus_screen(hass):
     await _setup(hass)
     ids = set(hass.states.async_entity_ids())
     for e in ("media_player.dosen_pro_loa", "assist_satellite.dosen_pro", "number.dosen_pro_tang_mic",
-              "number.dosen_pro_thoi_gian_sang_man_hinh", "number.dosen_pro_do_sang_man_hinh",
-              "switch.dosen_pro_tat_mic", "sensor.dosen_pro_muc_mic",
-              "switch.dosen_pro_hien_hoi_thoai_tren_man_hinh", "sensor.dosen_pro_noi_dung_man_hinh",
+              "switch.dosen_pro_tat_mic", "sensor.dosen_pro_muc_mic", "sensor.dosen_pro_noi_dung_man_hinh",
               "button.dosen_pro_bat_man_hinh", "button.dosen_pro_tat_man_hinh",
               "button.dosen_pro_ve_man_hinh_mac_dinh", "button.dosen_pro_dung_loa",
-              "event.dosen_pro_su_kien_camera", "select.dosen_pro_man_hinh_mac_dinh",
-              "select.dosen_pro_camera_mac_dinh", "select.dosen_pro_anh_mac_dinh",
-              "text.dosen_pro_dia_chi_mac_dinh"):
+              "event.dosen_pro_su_kien_camera", "camera.dosen_pro_camera"):
         assert e in ids, (e, sorted(ids))
-    assert "switch.dosen_pro_nguon_man_hinh" not in ids                  # nguồn màn hình là NÚT, không phải công tắc
+    # Cài đặt hiển thị nay nằm ở thẻ «Dosen Pro» (WebSocket), KHÔNG còn là thực thể trên thiết bị.
+    for gone in ("select.dosen_pro_man_hinh_mac_dinh", "select.dosen_pro_camera_mac_dinh", "select.dosen_pro_anh_mac_dinh",
+                 "select.dosen_pro_thoi_tiet_tren_dong_ho", "select.dosen_pro_xoay_hinh_mac_dinh", "select.dosen_pro_kieu_khung_hinh_mac_dinh",
+                 "select.dosen_pro_chat_luong_hinh_tren_man", "text.dosen_pro_dia_chi_mac_dinh", "number.dosen_pro_thoi_gian_sang_man_hinh",
+                 "number.dosen_pro_do_sang_man_hinh", "number.dosen_pro_thoi_gian_moi_man_luan_phien",
+                 "switch.dosen_pro_hien_hoi_thoai_tren_man_hinh", "switch.dosen_pro_luan_phien_man_hinh", "switch.dosen_pro_nguon_man_hinh"):
+        assert gone not in ids, gone
     assert hass.states.get("sensor.dosen_pro_noi_dung_man_hinh").state == "off"
 
 
 async def test_numbers_buttons_and_media_player(hass):
     await _setup(hass)
     cam = _cam()
-    await hass.services.async_call("number", "set_value", {"entity_id": "number.dosen_pro_thoi_gian_sang_man_hinh", "value": 0}, blocking=True)
-    await hass.services.async_call("number", "set_value", {"entity_id": "number.dosen_pro_do_sang_man_hinh", "value": 40}, blocking=True)
-    assert _calls("sleep")[-2:] == [{"seconds": 0, "luminance": None}, {"seconds": None, "luminance": 40}]
     for ent, expect in (("button.dosen_pro_bat_man_hinh", ("power", True)), ("button.dosen_pro_tat_man_hinh", ("power", False)),
                         ("button.dosen_pro_ve_man_hinh_mac_dinh", ("off",))):
         await hass.services.async_call("button", "press", {"entity_id": ent}, blocking=True)
@@ -209,11 +193,14 @@ async def test_numbers_buttons_and_media_player(hass):
     assert cam.speaker.calls[-1][1]["volume"] == 2.0
 
 
-async def test_default_screen_needs_a_source_and_uses_entity_lists(hass, monkeypatch):
-    calls = []
+async def _ws(hass, hass_ws_client, msg_type, **kw):
+    client = await hass_ws_client(hass)
+    await client.send_json({"id": 1, "type": msg_type, **kw})
+    return await client.receive_json()
 
+
+async def test_default_screen_needs_a_source_and_uses_entities_chosen_in_the_card(hass, hass_ws_client, monkeypatch):
     async def fake_cam(h, entity_id, base=None):
-        calls.append(("cam", entity_id))
         return "rtsp://resolved/" + entity_id
 
     async def fake_source(h, *, source=None, image_entity=None, base=None, **kw):
@@ -221,27 +208,32 @@ async def test_default_screen_needs_a_source_and_uses_entity_lists(hass, monkeyp
     monkeypatch.setattr(pkg, "resolve_camera", fake_cam)
     monkeypatch.setattr(pkg, "resolve_source", fake_source)
     await _setup(hass)
-    sel = lambda ent, opt: hass.services.async_call("select", "select_option", {"entity_id": ent, "option": opt}, blocking=True)
+    client = await hass_ws_client(hass)
+    n = 0
+
+    async def call(**changes):
+        nonlocal n
+        n += 1
+        await client.send_json({"id": n, "type": "dosen_pro/set", "changes": changes})
+        return await client.receive_json()
     for mode in ("live", "image", "video"):                                       # chưa chọn nguồn: báo lỗi, KHÔNG đổi loại
-        with pytest.raises(HomeAssistantError):
-            await sel("select.dosen_pro_man_hinh_mac_dinh", mode)
+        r = await call(default_mode=mode)
+        assert r["success"] is False and r["error"]["code"] == "dosen_pro_error", mode
     assert not _calls("default")
-    hass.states.async_set("camera.cua", "idle")
-    hass.states.async_set("image.thoi_tiet", "x")
-    cam = hass.states.get("select.dosen_pro_camera_mac_dinh")
-    assert "camera.cua" in cam.attributes["options"] and cam.state == "—"                  # chọn theo danh sách entity
-    assert "image.thoi_tiet" in hass.states.get("select.dosen_pro_anh_mac_dinh").attributes["options"]
-    await sel("select.dosen_pro_camera_mac_dinh", "camera.cua")
-    await sel("select.dosen_pro_man_hinh_mac_dinh", "live")
-    assert _calls("default")[-1] == {"mode": "live", "source": "rtsp://resolved/camera.cua"}
-    await sel("select.dosen_pro_anh_mac_dinh", "image.thoi_tiet")
-    await sel("select.dosen_pro_man_hinh_mac_dinh", "image")
+    st = (await call())["result"]["settings"]
+    assert st["default_mode"] is None                                            # lỗi không để lại trạng thái dở
+    r = await call(default_camera="camera.cua", default_mode="live")
+    assert r["success"] and _calls("default")[-1] == {"mode": "live", "source": "rtsp://resolved/camera.cua"}
+    assert r["result"]["settings"]["default_camera"] == "camera.cua"
+    await call(default_image="image.thoi_tiet", default_mode="image")
     assert _calls("default")[-1] == {"mode": "image", "source": "http://signed/image.thoi_tiet"}
-    await hass.services.async_call("text", "set_value", {"entity_id": "text.dosen_pro_dia_chi_mac_dinh", "value": "/local/clip.mp4"}, blocking=True)
-    await sel("select.dosen_pro_man_hinh_mac_dinh", "video")
+    await call(default_text="/local/clip.mp4", default_mode="video")
     assert _calls("default")[-1] == {"mode": "video", "source": "http://signed//local/clip.mp4"}
-    await sel("select.dosen_pro_man_hinh_mac_dinh", "off")
+    await call(default_mode="off")
     assert _calls("default")[-1] == {"mode": "off", "source": ""}
+    for bad in ({"default_mode": "bay"}, {"default_camera": "khong phai entity"}, {"default_rotate": 45}, {"khong_co": 1}, {"show_chat": "co"}):
+        r = await call(**bad)
+        assert r["success"] is False, bad
 
 
 # -- báo động, Assist, mic ------------------------------------------------------------
@@ -282,11 +274,11 @@ async def test_assist_conversation_is_shown_on_the_camera_screen(hass):
     t = _calls("text")[-1]
     assert t["owner"] == "assist" and t["ttl"] == 60 and t["title"] == "Trợ lý"                   # lớp riêng của Assist, có hạn
     assert [(m["role"], m["text"]) for m in t["messages"]] == [("user", "bật đèn phòng khách"), ("assistant", "Đã bật đèn.")]
-    await hass.services.async_call("switch", "turn_off", {"entity_id": "switch.dosen_pro_hien_hoi_thoai_tren_man_hinh"}, blocking=True)
+    await hass.data[DOMAIN][next(iter(hass.data[DOMAIN]))].display.async_set({"show_chat": False})
     n = len(_calls("text"))
     sat.on_pipeline_event(PipelineEvent(PipelineEventType.STT_END, {"stt_output": {"text": "xin chào"}}))
     await asyncio.sleep(0.4)
-    assert len(_calls("text")) == n                                            # tắt công tắc thì không vẽ gì nữa
+    assert len(_calls("text")) == n                                            # tắt «Hiện hội thoại» ở thẻ thì không vẽ gì nữa
 
 
 async def test_listening_text_is_released_when_the_run_ends_without_a_reply(hass, monkeypatch):
@@ -378,6 +370,7 @@ async def test_camera_volume_entities_read_and_write_the_camera(hass):
 async def test_rotate_and_fit_are_default_screen_settings_only(hass):
     await _setup(hass)
     cam = _cam()
+    coord = hass.data[DOMAIN][next(iter(hass.data[DOMAIN]))]
     with pytest.raises(vol.Invalid):                                   # sự kiện không có tham số xoay
         await hass.services.async_call(DOMAIN, "screen_show", {"source": "x", "rotate": 90}, blocking=True)
     with pytest.raises(vol.Invalid):
@@ -385,15 +378,11 @@ async def test_rotate_and_fit_are_default_screen_settings_only(hass):
                                        blocking=True)
     await hass.services.async_call(DOMAIN, "screen_default", {"mode": "live", "source": "rtsp://c", "rotate": 270},
                                    blocking=True)
-    assert _calls("default")[-1]["rotate"] == 270
-    assert hass.states.get("select.dosen_pro_xoay_hinh_mac_dinh").state == "270°"        # ô chọn khớp màn thật
-    await hass.services.async_call("select", "select_option", {"entity_id": "select.dosen_pro_xoay_hinh_mac_dinh",
-                                                               "option": "90°"}, blocking=True)
+    assert _calls("default")[-1]["rotate"] == 270 and coord.default_rotate == 270          # dịch vụ cập nhật cả cài đặt của thẻ
+    await coord.display.async_set({"default_rotate": 90})
     assert ("view", {"rotate": 90, "fit": "contain"}) in cam.screen.calls
-    await hass.services.async_call("select", "select_option", {"entity_id": "select.dosen_pro_kieu_khung_hinh_mac_dinh",
-                                                               "option": "Lấp đầy (cắt rìa)"}, blocking=True)
+    await coord.display.async_set({"default_fit": "cover"})
     assert cam.screen.calls[-1] == ("view", {"rotate": 90, "fit": "cover"})
-    assert hass.states.get("select.dosen_pro_kieu_khung_hinh_mac_dinh").state == "Lấp đầy (cắt rìa)"
 
 
 async def test_stt_audio_is_saved_with_the_recognised_text_for_diagnosis(hass):
@@ -564,9 +553,8 @@ async def test_weather_entity_feeds_the_clock_with_temperature_humidity_and_fore
     cam = _cam()
     hass.states.async_set("weather.nha", "partlycloudy", {"temperature": 82.4, "temperature_unit": "°F", "humidity": 70})
     await hass.async_block_till_done()
-    assert "weather.nha" in hass.states.get("select.dosen_pro_thoi_tiet_tren_dong_ho").attributes["options"]
-    await hass.services.async_call("select", "select_option", {"entity_id": "select.dosen_pro_thoi_tiet_tren_dong_ho",
-                                                               "option": "weather.nha"}, blocking=True)
+    coord = hass.data[DOMAIN][next(iter(hass.data[DOMAIN]))]
+    await coord.display.async_set({"default_weather": "weather.nha"})
     w = [c[1] for c in cam.screen.calls if c[0] == "weather"][-1]
     assert w == {"condition": "partlycloudy", "temp": 28.0, "humidity": 70, "high": 33.0, "low": 23.0}   # °F → °C
     hass.states.async_set("weather.nha", "rainy", {"temperature": 75.2, "temperature_unit": "°F", "humidity": 88})
@@ -576,8 +564,7 @@ async def test_weather_entity_feeds_the_clock_with_temperature_humidity_and_fore
             break
         await asyncio.sleep(0.05)
     assert [c[1] for c in cam.screen.calls if c[0] == "weather"][-1]["condition"] == "rainy"
-    await hass.services.async_call("select", "select_option", {"entity_id": "select.dosen_pro_thoi_tiet_tren_dong_ho",
-                                                               "option": "—"}, blocking=True)
+    await coord.display.async_set({"default_weather": ""})
     for _ in range(40):                                  # tác vụ nền lúc khởi động cũng đẩy thời tiết: chờ lần cuối là «không có»
         if [c[1] for c in cam.screen.calls if c[0] == "weather"][-1] is None:
             break
@@ -588,19 +575,18 @@ async def test_weather_entity_feeds_the_clock_with_temperature_humidity_and_fore
 async def test_weather_without_forecast_service_still_shows_current_conditions(hass):
     await _setup(hass)                                                          # không đăng ký weather.get_forecasts
     hass.states.async_set("weather.nha", "sunny", {"temperature": 30, "temperature_unit": "°C"})
-    await hass.services.async_call("select", "select_option", {"entity_id": "select.dosen_pro_thoi_tiet_tren_dong_ho",
-                                                               "option": "weather.nha"}, blocking=True)
+    await hass.data[DOMAIN][next(iter(hass.data[DOMAIN]))].display.async_set({"default_weather": "weather.nha"})
     w = [c[1] for c in _cam().screen.calls if c[0] == "weather"][-1]
     assert w["condition"] == "sunny" and w["temp"] == 30.0 and w["high"] is None and w["low"] is None
 
 
-async def test_quality_select_defaults_to_standard_and_pushes_changes_to_the_screen(hass):
+async def test_quality_defaults_to_standard_and_changes_are_pushed_and_saved(hass):
     await _setup(hass)
-    ent = "select.dosen_pro_chat_luong_hinh_tren_man"
-    assert hass.states.get(ent).state == "Chuẩn"
-    await hass.services.async_call("select", "select_option", {"entity_id": ent, "option": "Cao"}, blocking=True)
-    assert ("quality", "high") in _cam().screen.calls and hass.states.get(ent).state == "Cao"
-    await hass.services.async_call("select", "select_option", {"entity_id": ent, "option": "Cao nhất (thử, có thể đen)"}, blocking=True)
+    coord = hass.data[DOMAIN][next(iter(hass.data[DOMAIN]))]
+    assert coord.default_quality == "standard"
+    await coord.display.async_set({"default_quality": "high"})
+    assert ("quality", "high") in _cam().screen.calls
+    await coord.display.async_set({"default_quality": "max"})
     assert [c for c in _cam().screen.calls if c[0] == "quality"][-1] == ("quality", "max")
 
 
@@ -668,13 +654,13 @@ async def test_carousel_cycles_pages_under_its_own_owner_and_stop_releases_it(ha
     assert {o for _, o in seq} == {"carousel"}                                               # luôn dưới tên «carousel»
     card = _calls("card")[0]
     assert card["value"] == "3,4 kW" and card["ttl"] == pytest.approx(0.9)                  # lớp có hạn dài gấp 3 thời lượng trang
-    assert hass.states.get("switch.dosen_pro_luan_phien_man_hinh").state == "on"
+    assert c.carousel.on
     await hass.services.async_call(DOMAIN, "screen_carousel", {"enabled": False}, blocking=True)
     assert ("release", "carousel") in cam.screen.calls and not c.carousel.running
     n = len(cam.screen.calls)
     await asyncio.sleep(0.5)
     assert len(cam.screen.calls) == n                                                          # tắt rồi thì không đẩy gì nữa
-    assert hass.states.get("switch.dosen_pro_luan_phien_man_hinh").state == "off"
+    assert not c.carousel.on
 
 
 async def test_carousel_card_is_redrawn_only_when_its_data_changes(hass, monkeypatch):
@@ -703,10 +689,10 @@ async def test_carousel_service_validates_pages_and_needs_pages_to_start(hass):
             await hass.services.async_call(DOMAIN, "screen_carousel", {"pages": bad}, blocking=True)
     await hass.services.async_call(DOMAIN, "screen_carousel", {"pages": [{"type": "clock"}, {"type": "text", "title": "Xin chào"}],
                                                               "seconds": 20}, blocking=True)
-    st = hass.states.get("switch.dosen_pro_luan_phien_man_hinh")
-    assert st.state == "on" and st.attributes["pages"] == ["clock", "text"] and st.attributes["seconds"] == 20.0
-    await hass.services.async_call("switch", "turn_off", {"entity_id": "switch.dosen_pro_luan_phien_man_hinh"}, blocking=True)
-    assert hass.states.get("switch.dosen_pro_luan_phien_man_hinh").state == "off"
+    car = hass.data[DOMAIN][next(iter(hass.data[DOMAIN]))].carousel
+    assert car.on and [p["type"] for p in car.pages] == ["clock", "text"] and car.seconds == 20.0
+    await hass.services.async_call(DOMAIN, "screen_carousel", {"enabled": False}, blocking=True)
+    assert not car.on
 
 
 async def test_carousel_pages_and_switch_survive_a_restart(hass, hass_storage):
@@ -716,24 +702,23 @@ async def test_carousel_pages_and_switch_survive_a_restart(hass, hass_storage):
     await _setup(hass, entry_id="eid123")
     c = hass.data[DOMAIN]["eid123"]
     assert [p["type"] for p in c.carousel.pages] == ["clock", "text"] and c.carousel.seconds == 12.0
-    assert c.carousel.running and hass.states.get("switch.dosen_pro_luan_phien_man_hinh").state == "on"
+    assert c.carousel.running and c.carousel.on
     await c.carousel.async_stop()
 
 
-async def test_carousel_seconds_default_20_is_a_number_you_can_change_and_it_is_saved(hass):
+async def test_carousel_seconds_default_20_can_be_changed_and_is_validated(hass):
     await _setup(hass)
-    ent = "number.dosen_pro_thoi_gian_moi_man_luan_phien"
-    assert hass.states.get(ent).state == "20.0"                                    # mặc định 20 giây
     car = hass.data[DOMAIN][next(iter(hass.data[DOMAIN]))].carousel
-    await hass.services.async_call("number", "set_value", {"entity_id": ent, "value": 45}, blocking=True)
-    assert car.seconds == 45.0 and hass.states.get(ent).state == "45.0"
+    assert car.seconds == 20.0                                                     # mặc định 20 giây
+    car.set_seconds(45)
+    assert car.seconds == 45.0
     for bad in (1, 4000):
-        with pytest.raises(Exception):                                             # ngoài 3–3600 bị từ chối
-            await hass.services.async_call("number", "set_value", {"entity_id": ent, "value": bad}, blocking=True)
+        with pytest.raises(ValueError):                                            # ngoài 3–3600 bị từ chối
+            car.set_seconds(bad)
     assert car.seconds == 45.0
     await hass.services.async_call(DOMAIN, "screen_carousel", {"pages": [{"type": "clock"}, {"type": "text", "title": "A"}],
                                                               "enabled": False}, blocking=True)
-    assert [p.get("seconds") for p in car.pages] == [None, None]                    # trang không có seconds riêng → dùng ô số này
+    assert [p.get("seconds") for p in car.pages] == [None, None]                    # trang không có seconds riêng → dùng thời lượng chung
 
 
 async def test_card_translates_on_off_sensors_to_vietnamese_with_colour_and_custom_names(hass):

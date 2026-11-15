@@ -6,6 +6,7 @@ import asyncio
 import logging
 import secrets
 from datetime import timedelta
+from pathlib import Path
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
@@ -14,6 +15,7 @@ from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_USERNA
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import ConfigEntryError, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
@@ -25,24 +27,20 @@ from .dosen_core.camera import Camera
 from .intercom import DosenIntercomView
 from .dosen_core.config import CamConfig
 from .card import build_card
-from .carousel import Carousel
-from .dosen_core.render import CARD_COLORS
+from .carousel import _CARD_ENTITY, _CARD_ROW, COLOR, Carousel
+from .display import DisplaySettings
+from .websocket import async_register as ws_register
+from .dosen_core.render import CARD_LAYOUTS, CARD_THEMES
 from .dosen_core.screen import FITS, ROTATIONS
 from .resolve import resolve_camera, resolve_image, resolve_media, resolve_source
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS = [Platform.ASSIST_SATELLITE, Platform.BUTTON, Platform.CAMERA, Platform.EVENT, Platform.MEDIA_PLAYER,
-             Platform.NUMBER, Platform.SELECT, Platform.SENSOR, Platform.SWITCH, Platform.TEXT]
+             Platform.NUMBER, Platform.SELECT, Platform.SENSOR, Platform.SWITCH]
 
 _MESSAGE = vol.Schema({
     vol.Optional("role", default="info"): vol.In(["user", "assistant", "caller", "info"]),
     vol.Required("text"): cv.string,
-})
-_CARD_ENTITY = vol.Any(cv.entity_id, vol.Schema({vol.Required("entity"): cv.entity_id, vol.Optional("name"): cv.string}))
-_CARD_ROW = vol.Schema({
-    vol.Required("label"): cv.string,
-    vol.Required("value"): cv.string,
-    vol.Optional("color"): vol.In(list(CARD_COLORS)),
 })
 SERVICE_SCHEMAS = {
     "screen_carousel": vol.Schema({
@@ -56,7 +54,10 @@ SERVICE_SCHEMAS = {
         vol.Optional("title", default=""): cv.string,
         vol.Optional("value", default=""): cv.string,
         vol.Optional("caption", default=""): cv.string,
-        vol.Optional("color", default="red"): vol.In(list(CARD_COLORS)),
+        vol.Optional("color", default="red"): COLOR,
+        vol.Optional("theme", default="light"): vol.In(list(CARD_THEMES)),
+        vol.Optional("layout", default="list"): vol.In(list(CARD_LAYOUTS)),
+        vol.Optional("title_color"): COLOR,
         vol.Optional("main_entity"): cv.entity_id,
         vol.Optional("entities", default=[]): vol.All(cv.ensure_list, [_CARD_ENTITY]),
         vol.Optional("rows", default=[]): vol.All(cv.ensure_list, [vol.Any(_CARD_ROW, cv.string)]),
@@ -130,13 +131,14 @@ class DosenCoordinator(DataUpdateCoordinator):
         self.show_chat = True
         self.alarm_events_on = True
         self.audio: dict = {}             # âm lượng loa/mic + chống ồn đọc từ camera (rỗng = chưa đọc)
-        # Màn hình mặc định (đặt bởi các thực thể select/text trên thiết bị, khôi phục sau khi khởi động lại).
+        # Cài đặt hiển thị (đặt bằng thẻ «Dosen Pro» qua WebSocket, lưu bằng Store — xem display.py).
         self.default_mode: str | None = None
         self.default_camera = ""
         self.default_image = ""
         self.default_text = ""
         self.default_quality = "standard"        # chất lượng mã hoá hình lên màn camera (standard | high | max)
         self.carousel: Carousel | None = None   # màn luân phiên (tạo khi nạp mục cấu hình)
+        self.display: DisplaySettings | None = None   # lưu/áp cài đặt hiển thị (thẻ «Dosen Pro» điều khiển)
         self.default_weather = ""                # thực thể weather.* hiện trên đồng hồ ("" = không hiện)
         self._unsub_weather = None
         self.default_rotate = 0                  # xoay hình (độ, theo chiều kim đồng hồ) cho mọi lớp không tự nêu
@@ -214,17 +216,21 @@ class DosenCoordinator(DataUpdateCoordinator):
             return None, None
         return _celsius(hi, unit), _celsius(lo, unit)
 
-    async def push_weather(self) -> None:
-        """Đọc thực thể thời tiết đã chọn và đẩy xuống đồng hồ (None nếu chưa chọn / chưa có dữ liệu)."""
-        info = None
+    async def weather_info(self) -> dict | None:
+        """Thời tiết hiện tại của thực thể đã chọn (None nếu chưa chọn / chưa có dữ liệu), dạng đồng hồ cần."""
         eid = self.default_weather
         state = self.hass.states.get(eid) if eid else None
-        if state is not None and state.state not in ("unknown", "unavailable"):
-            a = state.attributes
-            unit = a.get("temperature_unit")
-            hi, lo = await self._forecast_range(eid, unit)
-            info = {"condition": state.state, "temp": _celsius(a.get("temperature"), unit),
-                    "humidity": a.get("humidity"), "high": hi, "low": lo}
+        if state is None or state.state in ("unknown", "unavailable"):
+            return None
+        a = state.attributes
+        unit = a.get("temperature_unit")
+        hi, lo = await self._forecast_range(eid, unit)
+        return {"condition": state.state, "temp": _celsius(a.get("temperature"), unit),
+                "humidity": a.get("humidity"), "high": hi, "low": lo}
+
+    async def push_weather(self) -> None:
+        """Đọc thực thể thời tiết đã chọn và đẩy xuống đồng hồ."""
+        info = await self.weather_info()
         try:
             await self.api.screen_weather(info)
         except DosenApiError as exc:
@@ -359,6 +365,7 @@ async def _handle(hass: HomeAssistant, call: ServiceCall) -> None:
                 coord.default_rotate = d["rotate"]
             if d.get("fit") is not None:
                 coord.default_fit = d["fit"]
+            coord.display._save()
             coord.async_update_listeners()
         elif call.service == "screen_off":
             await api.screen_off()
@@ -373,6 +380,49 @@ async def _handle(hass: HomeAssistant, call: ServiceCall) -> None:
     except DosenApiError as exc:
         raise HomeAssistantError(f"Dosen Pro: {exc}") from exc
     await coord.async_request_refresh()
+
+
+#: Thực thể của các cài đặt hiển thị cũ (ô chọn, ô số, công tắc, văn bản): nay gom vào thẻ «Dosen Pro». Hậu tố mã nhận dạng để dọn khỏi sổ đăng ký.
+REMOVED_UNIQUE_SUFFIXES = ("-screen_brightness", "-screen_time", "-carousel-seconds", "-default_image", "-default_camera",
+                           "-screen_quality", "-default_fit", "-default_screen", "-default_weather", "-default_rotate",
+                           "-show_chat", "-carousel", "-default_address")
+
+
+@callback
+def _remove_stale_entities(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Xoá khỏi sổ đăng ký các thực thể cài đặt hiển thị cũ để không còn «không khả dụng» treo trong giao diện."""
+    reg = er.async_get(hass)
+    for ent in er.async_entries_for_config_entry(reg, entry.entry_id):
+        if ent.unique_id.endswith(REMOVED_UNIQUE_SUFFIXES):
+            reg.async_remove(ent.entity_id)
+
+
+FRONTEND_URL = "/dosen_pro_static"
+
+
+async def _async_register_frontend(hass: HomeAssistant) -> None:
+    """Một lần cho cả HA: API WebSocket, tệp JS của thẻ (tự nạp trên mọi bảng điều khiển) và mục «Màn hình Dosen» ở thanh bên."""
+    if hass.data.get(f"{DOMAIN}_frontend"):
+        return
+    hass.data[f"{DOMAIN}_frontend"] = True
+    ws_register(hass)
+    await _async_register_frontend_assets(hass)
+
+
+async def _async_register_frontend_assets(hass: HomeAssistant) -> None:
+    from homeassistant.components import frontend, panel_custom
+    from homeassistant.components.http import StaticPathConfig
+    from homeassistant.loader import async_get_integration
+    version = (await async_get_integration(hass, DOMAIN)).version
+    await hass.http.async_register_static_paths([StaticPathConfig(FRONTEND_URL, str(Path(__file__).parent / "frontend"), False)])
+    url = f"{FRONTEND_URL}/dosen-pro-card.js?v={version}"
+    frontend.add_extra_js_url(hass, url)                  # thẻ có sẵn trong danh sách thẻ, không cần thêm tài nguyên
+    await panel_custom.async_register_panel(
+        hass, webcomponent_name="dosen-pro-panel", frontend_url_path="dosen-pro", module_url=url, sidebar_title="Màn hình Dosen",
+        sidebar_icon="mdi:monitor-cellphone", require_admin=True, config={})
+
+
+_REAL_ASSETS = _async_register_frontend_assets          # test gọi bản thật dù đã thay ``_async_register_frontend_assets``
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -396,10 +446,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     holder["coord"] = coord
     await coord.async_config_entry_first_refresh()
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coord
+    coord.display = DisplaySettings(coord)
+    await coord.display.async_load()
     coord.carousel = Carousel(coord)
     await coord.carousel.async_load()
     if not entry.data.get(CONF_INTERCOM_KEY):          # chưa có khoá bộ đàm (mục mới / vừa cấu hình lại): sinh một khoá
         hass.config_entries.async_update_entry(entry, data={**entry.data, CONF_INTERCOM_KEY: secrets.token_urlsafe(24)})
+    await _async_register_frontend(hass)
     if not hass.data.get(f"{DOMAIN}_view"):
         hass.http.register_view(DosenIntercomView())
         hass.data[f"{DOMAIN}_view"] = True
@@ -408,6 +461,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             async def _svc(call: ServiceCall, _hass=hass) -> None:
                 await _handle(_hass, call)
             hass.services.async_register(DOMAIN, name, _svc, schema=schema)
+    _remove_stale_entities(hass, entry)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     coord.alarm_events_on = bool(entry.options.get(CONF_ALARM_EVENTS, True))
     if coord.alarm_events_on:

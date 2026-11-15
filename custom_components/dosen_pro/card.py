@@ -49,15 +49,36 @@ def format_state(hass: HomeAssistant, entity_id: str) -> tuple[str, str]:
     return label, text
 
 
-def format_state_ex(hass: HomeAssistant, entity_id: str) -> tuple[str, str, str | None]:
-    """Như ``format_state`` nhưng kèm màu gợi ý (hiện diện «Có người» xanh lá, cửa mở cam, cảnh báo đỏ…) hoặc None."""
+#: Cảm biến dùng pin (Zigbee…) chỉ báo thưa: sau khi HA khởi động lại chúng «unknown» cho tới lần báo kế (đo 15/11: nhiệt độ phòng khách,
+#: ban công, độ ẩm phòng khách). Có bộ nhớ thì thẻ giữ giá trị gần nhất đã biết thay vì «—», nhưng không quá ngần này giây.
+MEMORY_MAX_AGE = 12 * 3600
+
+
+def format_state_ex(hass: HomeAssistant, entity_id: str, memory: dict | None = None,
+                    now: float | None = None) -> tuple[str, str, str | None]:
+    """Như ``format_state`` nhưng kèm màu gợi ý (hiện diện «Có người» xanh lá, cửa mở cam, cảnh báo đỏ…) hoặc None.
+
+    ``memory`` (tuỳ chọn): ``{entity_id: [chữ, màu, thời điểm]}``; giá trị tốt được ghi vào, và khi cảm biến chưa có số thì dùng lại giá trị
+    đã nhớ nếu chưa quá ``MEMORY_MAX_AGE``."""
+    import time
+    now = time.time() if now is None else now
     state = hass.states.get(entity_id)
     if state is None:
         return entity_id, _NO_VALUE, None
     label = str(state.attributes.get("friendly_name") or entity_id)
     raw = str(state.state)
     if raw.lower() in _UNKNOWN:
+        old = (memory or {}).get(entity_id)
+        if old and now - float(old[2]) <= MEMORY_MAX_AGE:
+            return label, old[0], old[1]
         return label, _NO_VALUE, None
+    result = _format_known(state, entity_id, label, raw)
+    if memory is not None:
+        memory[entity_id] = [result[1], result[2], now]
+    return result
+
+
+def _format_known(state, entity_id: str, label: str, raw: str) -> tuple[str, str, str | None]:
     translated = _entity_text(entity_id.split(".", 1)[0], state.attributes.get("device_class"), raw)
     if translated is not None:
         return label, translated[0], translated[1]
@@ -69,14 +90,14 @@ def format_state_ex(hass: HomeAssistant, entity_id: str) -> tuple[str, str, str 
     return label, f"{text} {unit}" if unit else text, None
 
 
-def build_card(hass: HomeAssistant, data: dict) -> dict:
+def build_card(hass: HomeAssistant, data: dict, memory: dict | None = None) -> dict:
     """Từ dữ liệu dịch vụ ``screen_card`` ra thẻ để vẽ: ``title, value, caption, rows, color``.
 
     ``main_entity`` thành số lớn (nhãn là tên thực thể nếu không nêu ``caption``); ``entities`` và ``rows`` thành các dòng
     (``rows`` trước, rồi ``entities``). Mỗi mục của ``entities`` là ``entity_id`` hoặc ``{entity, name}`` để tự đặt tên hiển thị. Dòng dạng chữ «nhãn: giá trị» được tách ở dấu hai chấm đầu tiên."""
     value, caption = data.get("value", ""), data.get("caption", "")
     if data.get("main_entity"):
-        label, text = format_state(hass, data["main_entity"])
+        label, text, _ = format_state_ex(hass, data["main_entity"], memory)
         value = value or text
         caption = caption or label
     rows: list[dict] = []
@@ -88,10 +109,12 @@ def build_card(hass: HomeAssistant, data: dict) -> dict:
             rows.append(dict(r))
     for item in data.get("entities", []):
         entity_id, name = (item["entity"], item.get("name")) if isinstance(item, dict) else (item, None)
-        label, text, colour = format_state_ex(hass, entity_id)
+        label, text, colour = format_state_ex(hass, entity_id, memory)
         row = {"label": name or label, "value": text}
+        colour = (item.get("color") if isinstance(item, dict) and item.get("color") else None) or colour     # màu tự chọn thắng màu theo trạng thái
         if colour:
             row["color"] = colour
         rows.append(row)
     return {"title": data.get("title", ""), "value": value, "caption": caption, "rows": rows,
-            "color": data.get("color", "red")}
+            "color": data.get("color", "red"), "theme": data.get("theme", "light"), "layout": data.get("layout", "list"),
+            "title_color": data.get("title_color")}
