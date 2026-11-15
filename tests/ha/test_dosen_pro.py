@@ -18,7 +18,7 @@ import custom_components.dosen_pro.config_flow as cflow
 from custom_components.dosen_pro.const import DOMAIN
 from custom_components.dosen_pro.dosen_core.dvrip import DVRIPError
 
-DATA = {CONF_HOST: "172.16.10.19", CONF_PORT: 34567, CONF_USERNAME: "jdja", CONF_PASSWORD: "mk"}
+DATA = {CONF_HOST: "192.168.1.50", CONF_PORT: 34567, CONF_USERNAME: "admin", CONF_PASSWORD: "mk"}
 
 
 _REAL: dict = {}
@@ -68,8 +68,8 @@ async def test_config_flow_ok_and_camera_config_is_stored(hass):
     r = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
     assert r["type"] == FlowResultType.FORM
     r = await hass.config_entries.flow.async_configure(r["flow_id"], DATA)
-    assert r["type"] == FlowResultType.CREATE_ENTRY and r["data"][CONF_HOST] == "172.16.10.19"
-    assert r["data"][CONF_USERNAME] == "jdja"
+    assert r["type"] == FlowResultType.CREATE_ENTRY and r["data"][CONF_HOST] == "192.168.1.50"
+    assert r["data"][CONF_USERNAME] == "admin"
 
 
 @pytest.mark.parametrize("exc,code", [
@@ -90,11 +90,11 @@ async def test_reconfigure_changes_ip_account_and_password(hass):
     entry = await _setup(hass)
     r = await entry.start_reconfigure_flow(hass)
     assert r["type"] == FlowResultType.FORM and r["step_id"] == "reconfigure"
-    new = {**DATA, CONF_HOST: "172.16.10.20", CONF_USERNAME: "dosen", CONF_PASSWORD: "moi"}
+    new = {**DATA, CONF_HOST: "192.168.1.51", CONF_USERNAME: "dosen", CONF_PASSWORD: "moi"}
     r = await hass.config_entries.flow.async_configure(r["flow_id"], new)
     assert r["type"] == FlowResultType.ABORT and r["reason"] == "reconfigure_successful"
     await hass.async_block_till_done()
-    assert entry.data[CONF_HOST] == "172.16.10.20" and entry.data[CONF_USERNAME] == "dosen"
+    assert entry.data[CONF_HOST] == "192.168.1.51" and entry.data[CONF_USERNAME] == "dosen"
     assert FakeCamera.instances[0].closed is True                         # mục nạp lại: camera cũ được đóng gọn
 
 
@@ -427,7 +427,7 @@ async def test_camera_entity_exposes_the_cameras_own_rtsp_stream_with_audio(hass
     await _setup(hass)
     assert hass.states.get("camera.dosen_pro_camera") is not None
     src = await ha_camera.async_get_stream_source(hass, "camera.dosen_pro_camera")
-    assert src == "rtsp://172.16.10.19:554/user=jdja&password=" + DATA[CONF_PASSWORD] + "&channel=1&stream=1.sdp"
+    assert src == "rtsp://192.168.1.50:554/user=admin&password=" + DATA[CONF_PASSWORD] + "&channel=1&stream=1.sdp"
     assert "password" not in str(hass.states.get("camera.dosen_pro_camera").attributes)   # không lộ ra thuộc tính
 
 
