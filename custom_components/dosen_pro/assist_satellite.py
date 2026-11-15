@@ -205,7 +205,8 @@ class DosenSatellite(DosenEntity, AssistSatelliteEntity):
                         self._hang.get_nowait()
                     self._hang.put_nowait(khuc)
             except DosenApiError as exc:
-                _LOGGER.debug("%s: cannot open the mic: %s", self.entity_id, exc)
+                _LOGGER.warning("%s: cannot open the mic (retry in %d s): %s", self.entity_id,
+                                min(300, 5 * 2 ** loi), exc)
             except (asyncio.IncompleteReadError, ConnectionError):
                 if not self._mo_lai_mic:
                     _LOGGER.warning("%s: mic stream ended, reopening", self.entity_id)
@@ -313,6 +314,9 @@ class DosenSatellite(DosenEntity, AssistSatelliteEntity):
         elif event.type is PipelineEventType.ERROR:
             _LOGGER.debug("%s: pipeline error %s", self.entity_id, data)
             self._tts_xong.set()
+            self._chat_ket_thuc()
+        elif event.type is PipelineEventType.RUN_END and not self._co_tts:
+            self._chat_ket_thuc()          # lượt nghe kết thúc không có lời đáp (không nghe thấy gì): đừng để «Đang nghe…» treo 60 s
 
     async def _phat_tts(self, luong: tts.ResultStream) -> None:
         self._dang_noi = True

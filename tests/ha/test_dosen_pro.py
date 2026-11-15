@@ -279,6 +279,23 @@ async def test_assist_conversation_is_shown_on_the_camera_screen(hass):
     assert len(_calls("text")) == n                                            # tắt công tắc thì không vẽ gì nữa
 
 
+async def test_listening_text_is_released_when_the_run_ends_without_a_reply(hass, monkeypatch):
+    """Gọi «alexa» rồi không nói gì: lượt kết thúc không có TTS, «Đang nghe…» không được treo tới hết hạn 60 s."""
+    from homeassistant.components.assist_pipeline import PipelineEvent, PipelineEventType
+    from homeassistant.components.assist_satellite.const import DOMAIN as AS_DOMAIN
+    from custom_components.dosen_pro import assist_satellite as sat_mod
+    monkeypatch.setattr(sat_mod, "CHAT_HOLD_SECONDS", 0.1)
+    await _setup(hass)
+    sat = hass.data[AS_DOMAIN].get_entity("assist_satellite.dosen_pro")
+    sat.on_pipeline_event(PipelineEvent(PipelineEventType.WAKE_WORD_END, {"wake_word_output": {}}))
+    await asyncio.sleep(0.4)
+    assert _calls("text")[-1]["messages"][-1]["text"] == "Đang nghe…"
+    assert ("release", "assist") not in _cam().screen.calls
+    sat.on_pipeline_event(PipelineEvent(PipelineEventType.RUN_END, {}))
+    await asyncio.sleep(0.5)
+    assert ("release", "assist") in _cam().screen.calls
+
+
 async def test_mic_level_sensor_follows_the_satellite_stream(hass):
     import array
     import math
