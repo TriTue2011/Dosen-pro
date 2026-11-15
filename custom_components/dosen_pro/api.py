@@ -52,8 +52,10 @@ class LocalApi:
     # -- màn hình -----------------------------------------------------------
     async def screen_show(self, source: str, loop: bool = False, after: str = "off",
                           owner: str = "automation", ttl: float | None = None, live: bool | None = None,
-                          priority: int = 2, split: bool = False) -> dict[str, Any]:
+                          priority: int = 2, split: bool = False, refresh=None) -> dict[str, Any]:
         kw: dict[str, Any] = {} if live is None else {"live": live}
+        if refresh is not None:
+            kw["refresh"] = refresh
         if priority != 2:
             kw["priority"] = priority
         if split:
@@ -64,6 +66,10 @@ class LocalApi:
                           owner: str = "automation", ttl: float | None = None, priority: int = 2) -> dict[str, Any]:
         kw = {"priority": priority} if priority != 2 else {}
         return await self._run(self.camera.screen.show_text, title, messages, font_size, after, owner, ttl, **kw)
+
+    async def screen_call(self, name: str, status: str, video: bool | None, color: str, owner: str,
+                          ttl: float | None = None) -> dict[str, Any]:
+        return await self._run(self.camera.screen.show_call, name, status, video, color, "hold", owner, ttl)
 
     async def screen_clock(self, after: str = "hold", owner: str = "automation", ttl: float | None = None) -> dict[str, Any]:
         return await self._run(self.camera.screen.show_clock, after, owner, ttl)
@@ -79,8 +85,11 @@ class LocalApi:
         return await self._run(self.camera.screen.release, owner)
 
     async def screen_default(self, mode: str, source: str = "", rotate: int | None = None,
-                             fit: str | None = None) -> dict[str, Any]:
-        return await self._run(self.camera.screen.set_default, mode, source, **_view(rotate, fit))
+                             fit: str | None = None, refresh=None) -> dict[str, Any]:
+        kw = _view(rotate, fit)
+        if refresh is not None:
+            kw["refresh"] = refresh
+        return await self._run(self.camera.screen.set_default, mode, source, **kw)
 
     async def screen_quality(self, quality: str) -> dict[str, Any]:
         return await self._run(self.camera.screen.set_quality, quality)

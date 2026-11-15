@@ -136,7 +136,7 @@ Dosen cung cấp đủ ba thứ cho tích hợp **Zalo Calling**:
   cuộc gọi.
 - **Hình từ điện thoại lên màn**: **tự động**. Khi tích hợp Zalo Call báo cuộc gọi đến / đang gọi, màn hiện tên người gọi; nghe máy thì
   hiện hình video của cuộc gọi (luồng `/api/call/video/view` của app Zalo, giống cửa sổ popup) bằng đường độ trễ thấp; kết thúc thì gỡ.
-  Cuộc gọi thoại chỉ hiện chữ. Tắt ở thẻ «Màn hình Dosen» → *Màn hình camera* → «Hiện cuộc gọi Zalo». Địa chỉ app Zalo lấy từ mục
+  Tên người gọi **cỡ lớn**, lấy từ danh bạ Zalo (tra theo mã người gọi qua tích hợp Zalo Call, không khai thêm gì); chưa có trong danh bạ thì hiện «Có người gọi», không bao giờ hiện dãy số. Cuộc gọi thoại chỉ hiện chữ. Tắt ở thẻ «Màn hình Dosen» → *Màn hình camera* → «Hiện cuộc gọi Zalo». Địa chỉ app Zalo lấy từ mục
   cấu hình của tích hợp Zalo Call, không cần khai thêm.
 
 > Phía Zalo Calling cần bản có hỗ trợ Dosen làm mic/loa; bản đó chưa có trong kho Zalo Calling công khai tại thời điểm phát hành này.
@@ -288,6 +288,7 @@ công tắc «Tiếng bíp khi nhấn nút» chỉ điều khiển `KeyAudioTip`
 | Log «camera refused AVTalk claim: Ret=503» | Camera còn giữ phiên hiển thị cũ hoặc app khác đang mở màn; tự thử lại, thường hết sau vài giây. |
 | Đăng nhập báo **Ret 205 / tài khoản bị khoá** | Đợi camera mở khoá (hoặc khởi động lại camera), kiểm đúng tên tài khoản; dùng tài khoản riêng. |
 | Vừa cập nhật mà không thấy thực thể mới | **Khởi động lại HA** (không chỉ *Tải lại*). |
+| Màn hiện camera mặc định, rút nguồn cắm lại thì log báo `401 Unauthorized` mãi | Đã sửa: luồng camera của HA có token đổi mỗi 5 phút, nên mỗi lần ffmpeg chạy lại tích hợp xin địa chỉ mới (trước đây dùng địa chỉ lưu từ lúc đặt, phải khởi động lại HA mới hết). |
 | Rút nguồn / cắm lại camera mà màn không về | Tích hợp tự phát hiện kết nối chết trong ~10 giây và thử lại 3 → 30 giây một lần; nếu vẫn kẹt, log có «watchdog» kèm dấu vết luồng — gửi đoạn đó. |
 
 ## Giới hạn đã biết

@@ -6,6 +6,7 @@ from __future__ import annotations
 class FakeScreen:
     def __init__(self):
         self.calls = []
+        self.refreshers = []                     # (lớp, hàm làm mới nguồn hoặc None) theo từng lần gọi show/set_default
         self._status = {"mode": "off", "open": False, "source": "", "size": [240, 320], "last_error": None,
                         "layers": [], "default": {"mode": "clock", "source": ""}}
 
@@ -18,7 +19,8 @@ class FakeScreen:
     def close(self):
         self.calls.append(("close",))
 
-    def show(self, source, loop, after, owner, ttl, live=None, priority=2, split=False):
+    def show(self, source, loop, after, owner, ttl, live=None, priority=2, split=False, refresh=None):
+        self.refreshers.append((owner, refresh))
         self.calls.append(("show", {"source": source, "loop": loop, "after": after, "owner": owner, "ttl": ttl,
                                     **({"live": live} if live is not None else {}),
                                     **({"priority": priority} if priority != 2 else {}), **({"split": True} if split else {})}))
@@ -27,6 +29,10 @@ class FakeScreen:
     def show_text(self, title, messages, font_size, after, owner, ttl, priority=2):
         self.calls.append(("text", {"title": title, "messages": messages, "font_size": font_size, "after": after,
                                     "owner": owner, "ttl": ttl, **({"priority": priority} if priority != 2 else {})}))
+        return self._status
+
+    def show_call(self, name, status, video, color, after, owner, ttl):
+        self.calls.append(("call", {"name": name, "status": status, "video": video, "color": color, "owner": owner, "ttl": ttl}))
         return self._status
 
     def show_clock(self, after, owner, ttl):
@@ -44,7 +50,8 @@ class FakeScreen:
         self.calls.append(("release", owner))
         return self._status
 
-    def set_default(self, mode, source, rotate=None, fit=None):
+    def set_default(self, mode, source, rotate=None, fit=None, refresh=None):
+        self.refreshers.append(("default", refresh))
         self.calls.append(("default", {"mode": mode, "source": source,
                                        **({"rotate": rotate} if rotate is not None else {}),
                                        **({"fit": fit} if fit is not None else {})}))

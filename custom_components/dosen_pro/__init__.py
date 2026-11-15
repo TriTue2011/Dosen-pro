@@ -154,17 +154,32 @@ class DosenCoordinator(DataUpdateCoordinator):
         async with self._default_lock:
             await self._apply_default_locked()
 
+    def camera_refresher(self, entity_id: str, base: str | None):
+        """Hàm đồng bộ (gọi từ luồng của màn hình) xin địa chỉ luồng MỚI của camera HA: token luồng quay vòng nên địa chỉ lưu sẵn sẽ hết hạn."""
+        def refresh() -> str | None:
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                pass
+            else:
+                return None                                   # đang ở luồng sự kiện: chờ kết quả sẽ tự khoá cứng, dùng địa chỉ cũ
+            return asyncio.run_coroutine_threadsafe(resolve_camera(self.hass, entity_id, base), self.hass.loop).result(8)
+        return refresh
+
     async def _apply_default_locked(self) -> None:
         mode = self.default_mode
         if mode is None:
             return
         url = ""
         base = self.ha_base
+        refresh = None
         if mode == "live":
             if not (self.default_camera or self.default_text):
                 raise HomeAssistantError("Chọn camera ở ô «Camera mặc định» (hoặc nhập địa chỉ rtsp:// ở ô «Địa chỉ mặc định»)")
             url = await (resolve_camera(self.hass, self.default_camera, base) if self.default_camera
                          else resolve_source(self.hass, source=self.default_text, base=base))
+            if self.default_camera:
+                refresh = self.camera_refresher(self.default_camera, base)
         elif mode == "image":
             if not (self.default_image or self.default_text):
                 raise HomeAssistantError("Chọn ảnh ở ô «Ảnh mặc định» (hoặc nhập địa chỉ ở ô «Địa chỉ mặc định»)")
@@ -175,7 +190,7 @@ class DosenCoordinator(DataUpdateCoordinator):
                 raise HomeAssistantError("Nhập địa chỉ video ở ô «Địa chỉ mặc định»")
             url = await resolve_source(self.hass, source=self.default_text, base=base)
         try:
-            await self.api.screen_default(mode, url)
+            await self.api.screen_default(mode, url, refresh=refresh)
         except DosenApiError as exc:
             raise HomeAssistantError(f"Dosen Pro: {exc}") from exc
         await self.async_request_refresh()
@@ -295,8 +310,9 @@ async def _handle(hass: HomeAssistant, call: ServiceCall) -> None:
         if call.service == "screen_show":
             url = await resolve_source(coord.hass, source=d.get("source"), camera_entity=d.get("camera_entity"),
                                        media=d.get("media"), base=coord.ha_base)
+            refresh = coord.camera_refresher(d["camera_entity"], coord.ha_base) if d.get("camera_entity") else None
             await api.screen_show(url, d["loop"], d["after"], d["owner"], d.get("ttl"), d.get("live"),
-                                  d["priority"], d["split"])
+                                  d["priority"], d["split"], refresh)
         elif call.service == "screen_text":
             await api.screen_text(d["title"], d["messages"], d["font_size"], d["after"], d["owner"],
                                   d.get("ttl"), d["priority"])
@@ -320,7 +336,9 @@ async def _handle(hass: HomeAssistant, call: ServiceCall) -> None:
             if d["mode"] in ("image", "video", "live"):
                 url = await resolve_source(coord.hass, source=d.get("source"), camera_entity=d.get("camera_entity"),
                                            media=d.get("media"), base=coord.ha_base)
-            await api.screen_default(d["mode"], url, d.get("rotate"), d.get("fit"))
+            refresh = (coord.camera_refresher(d["camera_entity"], coord.ha_base)
+                       if d["mode"] == "live" and d.get("camera_entity") else None)
+            await api.screen_default(d["mode"], url, d.get("rotate"), d.get("fit"), refresh)
             if d.get("rotate") is not None:            # giữ các ô «Xoay hình / Kiểu khung hình mặc định» khớp với màn thật
                 coord.default_rotate = d["rotate"]
             if d.get("fit") is not None:

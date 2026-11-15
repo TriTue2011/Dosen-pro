@@ -375,7 +375,7 @@ class Screen:
         if not src:
             return None
         return {"owner": "default", "source": src, "mode": mode, "loop": mode == "video",
-                "after": "off"}
+                "after": "off", "refresh": self.default.get("refresh")}
 
     def _view_of(self, layer: dict) -> tuple[int, str]:
         """Xoay + kiểu khung: CHỈ áp cho màn hình mặc định (ảnh, video, live). Lớp sự kiện (cuộc gọi, chuông cửa,
@@ -411,6 +411,21 @@ class Screen:
         return {"owner": "split", "mode": "live", "source": " + ".join(m["source"] for m in members),
                 "members": members, "loop": False, "after": "hold", "live": True, "priority": top["priority"]}
 
+    @staticmethod
+    def _refresh_source(layer: dict) -> None:
+        """Nguồn có mã truy cập QUAY VÒNG (luồng camera của HA: token đổi mỗi 5 phút, hết hạn sau ~10 phút) thì xin địa chỉ mới MỖI LẦN
+        khởi động lại ffmpeg. Dùng địa chỉ cũ lưu từ lúc đặt thì sau lần mất kết nối đầu tiên là 401 mãi tới khi khởi động lại HA."""
+        refresh = layer.get("refresh")
+        if refresh is None:
+            return
+        try:
+            fresh = refresh()
+        except Exception as exc:                                       # noqa: BLE001 — không làm hỏng việc hiện hình: dùng địa chỉ cũ
+            log.warning("man hinh: khong lam moi duoc nguon (%s); dung dia chi cu", exc)
+            return
+        if fresh:
+            layer["source"] = fresh
+
     def _apply(self) -> None:
         """Make the encoder show the top layer (or the default); close the session if nothing is left."""
         with self._lock:
@@ -438,6 +453,10 @@ class Screen:
         self._stop_encoder()
         assert self._sender is not None
         self._sender.reset()
+        for part in layer.get("members") or [layer]:
+            self._refresh_source(part)
+        if layer.get("members"):
+            layer["source"] = " + ".join(m["source"] for m in layer["members"])
         live = is_live_source(layer["source"]) if layer.get("live") is None else bool(layer["live"])
         self._sender.set_live(live)                               # nguồn trực tiếp: bộ gửi bỏ khung cũ khi chậm
         if layer.get("members"):
@@ -463,7 +482,7 @@ class Screen:
 
     def show(self, source: str, loop: bool = False, after: str = "off", owner: str = "api",
              ttl: float | None = None, mode: str | None = None, live: bool | None = None,
-             priority: int = PRIORITY_DEFAULT, split: bool = False) -> dict:
+             priority: int = PRIORITY_DEFAULT, split: bool = False, refresh=None) -> dict:
         """Push an event layer showing ``source`` (file, URL, rtsp://, image, lavfi:...).
 
         The newest layer is displayed. A layer ends when its source ends (``after="off"``), when
@@ -485,7 +504,7 @@ class Screen:
             self._layers = [l for l in self._layers if l["owner"] != owner]
             self._seq += 1
             layer = {"owner": owner, "source": source, "loop": bool(loop), "after": after, "live": live,
-                     "mode": mode or self._kind(source), "seq": self._seq, "split": bool(split),
+                     "mode": mode or self._kind(source), "seq": self._seq, "split": bool(split), "refresh": refresh,
                      "priority": 0 if owner == CAROUSEL_OWNER else priority,     # luân phiên nằm DƯỚI mọi sự kiện (mức 0)
                      "deadline": time.monotonic() + ttl if ttl else None}
             self._layers.append(layer)
@@ -528,6 +547,24 @@ class Screen:
                     pass
         return status
 
+    def show_call(self, name: str, status: str, video: bool | None = None, color: str = "red", after: str = "hold",
+                  owner: str = "zalo_call", ttl: float | None = None, priority: int = PRIORITY_DEFAULT) -> dict:
+        """Màn cuộc gọi: tên người gọi cỡ lớn + trạng thái (xem ``render.render_call``), hiện như một lớp sự kiện."""
+        if color not in render.CALL_COLORS:
+            raise ValueError("color must be one of " + ", ".join(render.CALL_COLORS))
+        path = os.path.join(self._tmpdir, "text-%s-%d.png" % (re.sub(r"\W", "_", owner), self.switches + 1))
+        with open(path, "wb") as f:
+            f.write(render.render_call(name, status, video, color))
+        status_ = self.show(path, after=after, owner=owner, ttl=ttl, mode="text", priority=priority)
+        for old in os.listdir(self._tmpdir):               # giữ ảnh chữ mới nhất và đồng hồ, như show_text
+            if old.startswith("text-") and old != os.path.basename(path) \
+                    and not any(l["source"].endswith(old) for l in self._layers):
+                try:
+                    os.remove(os.path.join(self._tmpdir, old))
+                except OSError:
+                    pass
+        return status_
+
     def show_card(self, title: str = "", value: str = "", caption: str = "", rows: list | None = None,
                   color: str = "red", after: str = "hold", owner: str = "api", ttl: float | None = None,
                   theme: str = "light", layout: str = "list", title_color: str | None = None,
@@ -568,7 +605,7 @@ class Screen:
             self._apply()
         return self.status()
 
-    def set_default(self, mode: str, source: str = "", rotate: int | None = None, fit: str | None = None) -> dict:
+    def set_default(self, mode: str, source: str = "", rotate: int | None = None, fit: str | None = None, refresh=None) -> dict:
         """Default screen. ``rotate``/``fit`` set the screen-wide view (None = keep the current one)."""
         if mode not in _DEFAULT_MODES:
             raise ValueError("mode must be one of " + ", ".join(_DEFAULT_MODES))
@@ -580,7 +617,7 @@ class Screen:
                 self.view["rotate"] = rotate
             if fit is not None:
                 self.view["fit"] = fit
-            self.default = {"mode": mode, "source": source if mode in ("image", "video", "live") else ""}
+            self.default = {"mode": mode, "source": source if mode in ("image", "video", "live") else "", "refresh": refresh}
             self._cur_key = None                      # force the encoder to restart on the new default
             self._apply()
         return self.status()
@@ -749,7 +786,7 @@ class Screen:
         return {"mode": self.mode,
                 "open": bool(s and s.running),
                 "source": redact_source(self.source) if self.mode not in ("text", "clock") else self.mode,
-                "default": dict(self.default, source=redact_source(self.default["source"])),
+                "default": {"mode": self.default["mode"], "source": redact_source(self.default["source"])},
                 "view": dict(self.view), "quality": self.quality, "aborts": self.aborts, "weather": dict(self.weather) if self.weather else None,
                 "layers": [{"owner": l["owner"], "mode": l["mode"],
                             "source": redact_source(l["source"]) if l["mode"] not in ("text", "clock") else l["mode"],

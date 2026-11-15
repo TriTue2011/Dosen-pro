@@ -354,6 +354,40 @@ def render_card(title: str = "", value: str = "", caption: str = "", rows: list 
     return buf.getvalue()
 
 
+ZALO_BLUE = (0, 104, 255)
+CALL_COLORS = {"red": (214, 22, 22), "orange": (230, 120, 0), "green": (0, 140, 60)}
+
+
+def render_call(name: str, status: str, video: bool | None = None, color: str = "red") -> bytes:
+    """PNG 240x320 cho cuộc gọi Zalo: thanh «Zalo», TÊN người gọi rất lớn (xuống dòng tới 3 dòng, vừa khung), trạng thái bên dưới.
+    ``video``: True «gọi video», False «gọi thoại», None «cuộc gọi» (sự kiện cuộc gọi đến không luôn nói rõ loại). Nền sáng, chữ đen, như đồng hồ."""
+    img = Image.new("RGB", (WIDTH, HEIGHT), CLOCK_BG)
+    d = ImageDraw.Draw(img)
+    d.rectangle((0, 0, WIDTH, 46), fill=ZALO_BLUE)
+    label, f = _fit_font(d, "Zalo · cuộc gọi" if video is None else ("Zalo · gọi video" if video else "Zalo · gọi thoại"), WIDTH - 16, 21, 12, True)
+    _centered(d, label, f, WIDTH / 2, 11, (255, 255, 255))
+    name = (name or "").strip() or "Có người gọi"
+    max_w, top, bottom = WIDTH - 20, 62, 232
+    for size in range(46, 19, -2):                       # cỡ lớn nhất mà tên vừa tối đa 3 dòng trong vùng giữa
+        fn = _font(size, True)
+        lines = _wrap(d, name, fn, max_w)
+        if len(lines) <= 3 and len(lines) * int(size * 1.25) <= bottom - top:
+            break
+    lines = lines[:3]
+    step = int(size * 1.25)
+    y = top + (bottom - top - step * len(lines)) // 2
+    for ln in lines:
+        text, fl = _fit_font(d, ln, max_w, size, 14, True)
+        _centered(d, text, fl, WIDTH / 2, y, INK)
+        y += step
+    d.line([20, 244, WIDTH - 20, 244], fill=RULE, width=1)
+    text, fs = _fit_font(d, status, WIDTH - 20, 26, 14, True)
+    _centered(d, text, fs, WIDTH / 2, 262, CALL_COLORS.get(color, CALL_COLORS["red"]))
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()
+
+
 def _draw_list(d, rows, value, caption, accent, theme, y, has_title):
     th = _THEME[theme]
     ink, rule, soft = th["ink"], th["rule"], th["soft"]
