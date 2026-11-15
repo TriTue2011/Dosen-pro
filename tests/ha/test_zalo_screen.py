@@ -139,3 +139,49 @@ async def test_contacts_failure_still_shows_the_call(hass):
     await _setup(hass)
     await _fire(hass, state="incoming", peer="Bà Năm", thread_id="55", call_id="3", call_type="user")
     assert _calls("call")[-1]["name"] == "Bà Năm"                                  # tên có sẵn trong sự kiện vẫn dùng được
+
+
+class _LoginRuntime(_FakeZaloRuntime):
+    """Tích hợp Zalo Call giữ aiohttp session (cookie jar) + login(): Dosen dùng lại để lấy cookie phiên cho luồng hình."""
+
+    def __init__(self, token="tok123", fail=False):
+        super().__init__({"friends": {"rows": []}})
+        from http.cookies import SimpleCookie
+
+        from yarl import URL
+        self.logins = 0
+        outer = self
+
+        class Jar:
+            def filter_cookies(self, url):
+                c = SimpleCookie()
+                if token:
+                    c["zalo_pc_app"] = token
+                return c
+        self.api._s = type("S", (), {"cookie_jar": Jar()})()
+
+        async def login():
+            outer.logins += 1
+            if fail:
+                raise TimeoutError("app chậm")
+        self.api.login = login
+
+
+async def test_video_layer_carries_the_app_session_cookie(hass):
+    await _zalo_entry(hass)
+    rt = _LoginRuntime()
+    hass.data["zalo_call"] = {"e1": rt}
+    await _setup(hass)
+    await _fire(hass, state="answered", peer="Bà", thread_id="55", call_id="9", call_type="video")
+    assert rt.logins == 1
+    owner, headers = [h for h in _cam().screen.headers if h[0] == "zalo_call_video"][-1]
+    assert headers == "Cookie: zalo_pc_app=tok123\r\n"
+
+
+async def test_video_layer_still_tries_without_cookie_when_login_fails(hass):
+    await _zalo_entry(hass)
+    hass.data["zalo_call"] = {"e1": _LoginRuntime(fail=True)}
+    await _setup(hass)
+    await _fire(hass, state="answered", peer="Bà", thread_id="55", call_id="9", call_type="video")
+    assert [h for h in _cam().screen.headers if h[0] == "zalo_call_video"][-1][1] is None
+    assert _calls("show")

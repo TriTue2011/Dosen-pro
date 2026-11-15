@@ -11,6 +11,7 @@ import logging
 from typing import Any
 
 from homeassistant.core import Event, HomeAssistant, callback
+from yarl import URL
 
 from .api import DosenApiError
 
@@ -23,6 +24,8 @@ TERMINAL_STATES = ("ended", "missed", "rejected", "declined", "no_answer", "erro
 HOLD_SECONDS = 3600                                  # lớp tự hết hạn nếu sự kiện kết thúc không tới (HA/Zalo chết giữa chừng)
 _SAY = {"incoming": ("đang gọi đến", "red"), "ringing": ("đang đổ chuông", "orange"), "answered": ("đang nói chuyện", "green")}
 UNKNOWN_CALLER = "Có người gọi"
+SESSION_COOKIE = "zalo_pc_app"                       # tên cookie phiên của app Zalo (app_auth.COOKIE_NAME)
+LOGIN_TIMEOUT_S = 5.0
 NAMES_TTL_S = 60.0                                   # danh bạ lấy từ app Zalo, nhớ chừng này giây rồi lấy lại khi gặp mã chưa biết
 CONTACTS_TIMEOUT_S = 3.0
 
@@ -87,6 +90,22 @@ class ZaloCallScreen:
                 return api
         return None
 
+    async def _video_headers(self, base: str) -> str | None:
+        """Tiêu đề HTTP «Cookie: …» mang phiên đăng nhập app Zalo cho ffmpeg: ``/api/call/video/view`` cần đăng nhập, không có thì 401 và màn
+        không hiện hình (nhật ký HA 15/11: «Server returned 401 Unauthorized»). Dùng lại phiên của tích hợp Zalo Call (đăng nhập lại để chắc còn
+        hạn). Không lấy được thì thôi (trả None, ffmpeg thử không cookie)."""
+        api = self._contacts_api()
+        session = getattr(api, "_s", None)
+        if api is None or session is None or not callable(getattr(api, "login", None)):
+            return None
+        try:
+            await asyncio.wait_for(api.login(), LOGIN_TIMEOUT_S)
+            morsel = session.cookie_jar.filter_cookies(URL(base)).get(SESSION_COOKIE)
+        except Exception as exc:                                  # noqa: BLE001 — app chưa lên / sai mật khẩu: không có cookie
+            _LOGGER.debug("Không lấy được phiên app Zalo cho luồng hình: %s", exc)
+            return None
+        return f"Cookie: {SESSION_COOKIE}={morsel.value}\r\n" if morsel is not None and morsel.value else None
+
     async def _caller_name(self, data: dict) -> str:
         """Tên để HIỆN: tên đã lưu trong danh bạ Zalo (tra theo mã) → tên có sẵn trong sự kiện → «Có người gọi». KHÔNG BAO GIỜ hiện dãy số:
         sự kiện cuộc gọi đến chỉ mang mã người (thread_id) trong ``peer``."""
@@ -118,7 +137,8 @@ class ZaloCallScreen:
                     url = video_url(self.hass, data.get("call_id"))
                     if url:
                         # after="off": hình hết/không có (cuộc gọi thoại: app trả 409) thì lớp tự gỡ, còn lại lớp chữ bên dưới.
-                        await api.screen_show(url, False, "off", OWNER_VIDEO, HOLD_SECONDS, live=True)
+                        await api.screen_show(url, False, "off", OWNER_VIDEO, HOLD_SECONDS, live=True,
+                                              headers=await self._video_headers(app_base_url(self.hass)))
                 elif state in TERMINAL_STATES:
                     await api.screen_release(OWNER_VIDEO)
                     await api.screen_release(OWNER_TEXT)

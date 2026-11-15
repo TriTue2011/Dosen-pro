@@ -82,7 +82,7 @@ def is_live_source(source: str) -> bool:
     return low.startswith("rtsp://") or low.startswith("rtsps://") or low.endswith((".mjpg", ".mjpeg", "/video/view", "/mjpeg", "/stream.mjpg"))
 
 
-def _input_args(source: str, fps: int, live: bool, loop: bool) -> list[str]:
+def _input_args(source: str, fps: int, live: bool, loop: bool, headers: str | None = None) -> list[str]:
     """Tuỳ chọn đầu vào ffmpeg cho một nguồn, kết thúc bằng ``-i <nguồn>``."""
     cmd: list[str] = []
     image = source.lower().split("?")[0].endswith(_IMAGE_EXT)
@@ -102,6 +102,8 @@ def _input_args(source: str, fps: int, live: bool, loop: bool) -> list[str]:
     if source.startswith("lavfi:"):
         cmd += ["-f", "lavfi"]
         source = source[len("lavfi:"):]
+    if headers and source.lower().startswith(("http://", "https://")):
+        cmd += ["-headers", headers]                      # vd. "Cookie: …\r\n": nguồn HTTP cần đăng nhập (luồng hình của app Zalo)
     return cmd + ["-i", source]
 
 
@@ -124,13 +126,13 @@ def _fit_filter(width: int, height: int, fit: str) -> str:
 
 def build_hevc_cmd(source: str, width: int, height: int, fps: int,
                    loop: bool = False, ffmpeg: str = "ffmpeg", rotate: int = 0, fit: str = "contain",
-                   quality: str = "standard", live: bool | None = None) -> list[str]:
+                   quality: str = "standard", live: bool | None = None, headers: str | None = None) -> list[str]:
     """ffmpeg command: any source -> rotated, fitted H.265 Annex-B on stdout (xem ``_QUALITY`` về các mức chất lượng)."""
     check_view(rotate, fit)
     check_quality(quality)
     live = is_live_source(source) if live is None else live
     cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin"]
-    cmd += _input_args(source, fps, live, loop)
+    cmd += _input_args(source, fps, live, loop, headers)
     cmd += ["-an", "-vf", f"{_ROTATE_FILTER[rotate]}{_fit_filter(width, height, fit)},fps={fps}"]
     return cmd + _encode_args(quality, fps, live)
 
@@ -423,6 +425,8 @@ class Screen:
         except Exception as exc:                                       # noqa: BLE001 — không làm hỏng việc hiện hình: dùng địa chỉ cũ
             log.warning("man hinh: khong lam moi duoc nguon (%s); dung dia chi cu", exc)
             return
+        if isinstance(fresh, tuple):                                   # (địa chỉ, tiêu đề HTTP): nguồn cần đăng nhập lại
+            fresh, layer["headers"] = fresh
         if fresh:
             layer["source"] = fresh
 
@@ -444,7 +448,7 @@ class Screen:
             self.mode, self.source = "off", ""
             return
         rotate, fit = self._view_of(layer)
-        key = (layer["owner"], layer["source"], layer["loop"], layer["mode"], rotate, fit, self.quality, layer.get("live"))
+        key = (layer["owner"], layer["source"], layer["loop"], layer["mode"], rotate, fit, self.quality, layer.get("live"), layer.get("headers"))
         if self._sender is None or not self._sender.running:
             self._cur_key = None                  # the AVTalk session died or was closed by a failed reopen: open it again below
         if key == self._cur_key and (self._proc is not None or layer.get("ended")):
@@ -464,7 +468,7 @@ class Screen:
                                   self.quality)
         else:
             cmd = build_hevc_cmd(layer["source"], self.width, self.height, self.fps, layer["loop"], self.cfg.ffmpeg,
-                                 rotate, fit, self.quality, live)
+                                 rotate, fit, self.quality, live, layer.get("headers"))
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         except OSError as exc:
@@ -482,7 +486,7 @@ class Screen:
 
     def show(self, source: str, loop: bool = False, after: str = "off", owner: str = "api",
              ttl: float | None = None, mode: str | None = None, live: bool | None = None,
-             priority: int = PRIORITY_DEFAULT, split: bool = False, refresh=None) -> dict:
+             priority: int = PRIORITY_DEFAULT, split: bool = False, refresh=None, headers: str | None = None) -> dict:
         """Push an event layer showing ``source`` (file, URL, rtsp://, image, lavfi:...).
 
         The newest layer is displayed. A layer ends when its source ends (``after="off"``), when
@@ -504,7 +508,7 @@ class Screen:
             self._layers = [l for l in self._layers if l["owner"] != owner]
             self._seq += 1
             layer = {"owner": owner, "source": source, "loop": bool(loop), "after": after, "live": live,
-                     "mode": mode or self._kind(source), "seq": self._seq, "split": bool(split), "refresh": refresh,
+                     "mode": mode or self._kind(source), "seq": self._seq, "split": bool(split), "refresh": refresh, "headers": headers,
                      "priority": 0 if owner == CAROUSEL_OWNER else priority,     # luân phiên nằm DƯỚI mọi sự kiện (mức 0)
                      "deadline": time.monotonic() + ttl if ttl else None}
             self._layers.append(layer)

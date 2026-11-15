@@ -98,3 +98,40 @@ def test_live_mjpeg_over_http_reaches_the_screen_encoder_quickly_and_keeps_up(tm
     assert max(n for _, _, n in aus) <= 8000                                         # vẫn dưới ngưỡng khung làm camera đen
     keys = [t for t, k, _ in aus if k]
     assert len(keys) >= 4 and max(b - a for a, b in zip(keys, keys[1:])) < 1.6        # khung khoá đều ~1 s
+
+
+class _NeedLogin(_Mjpeg):
+    """Giống app Zalo: /api/call/video/view chỉ mở khi có cookie phiên, không thì 401."""
+
+    def do_GET(self):
+        if "zalo_pc_app=tok123" not in (self.headers.get("Cookie") or ""):
+            self.send_response(401)
+            self.end_headers()
+            return
+        super().do_GET()
+
+
+@needs_x265
+def test_http_source_that_needs_login_works_with_the_cookie_header_and_is_401_without(tmp_path):
+    """15/11: màn không hiện hình cuộc gọi vì ffmpeg gọi luồng hình của app KHÔNG kèm phiên đăng nhập → «Server returned 401»."""
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _NeedLogin)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}/api/call/video/view?call_id=1"
+    no_cookie = subprocess.run(build_hevc_cmd(url, 240, 320, 10), capture_output=True, timeout=30)
+    assert b"401" in no_cookie.stderr and not no_cookie.stdout
+    cmd = build_hevc_cmd(url, 240, 320, 10, headers="Cookie: zalo_pc_app=tok123\r\n")
+    assert cmd[cmd.index("-headers") + 1] == "Cookie: zalo_pc_app=tok123\r\n"
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    splitter, keys, t0 = avtalk.HevcSplitter(), 0, time.monotonic()
+    try:
+        while time.monotonic() - t0 < 10 and keys < 1:
+            chunk = p.stdout.read1(65536)
+            if not chunk:
+                break
+            keys += sum(1 for is_key, _ in splitter.feed(chunk) if is_key)
+    finally:
+        p.kill()
+        p.wait()
+        srv.shutdown()
+    assert keys >= 1
+    assert "-headers" not in build_hevc_cmd("rtsp://cam/x", 240, 320, 10, headers="Cookie: a=b\r\n")     # chỉ áp cho nguồn HTTP

@@ -52,8 +52,10 @@ class LocalApi:
     # -- màn hình -----------------------------------------------------------
     async def screen_show(self, source: str, loop: bool = False, after: str = "off",
                           owner: str = "automation", ttl: float | None = None, live: bool | None = None,
-                          priority: int = 2, split: bool = False, refresh=None) -> dict[str, Any]:
+                          priority: int = 2, split: bool = False, refresh=None, headers: str | None = None) -> dict[str, Any]:
         kw: dict[str, Any] = {} if live is None else {"live": live}
+        if headers:
+            kw["headers"] = headers
         if refresh is not None:
             kw["refresh"] = refresh
         if priority != 2:

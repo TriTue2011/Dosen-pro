@@ -6,6 +6,7 @@ from __future__ import annotations
 class FakeScreen:
     def __init__(self):
         self.calls = []
+        self.headers = []                        # (lớp, tiêu đề HTTP) theo từng lần show
         self.refreshers = []                     # (lớp, hàm làm mới nguồn hoặc None) theo từng lần gọi show/set_default
         self._status = {"mode": "off", "open": False, "source": "", "size": [240, 320], "last_error": None,
                         "layers": [], "default": {"mode": "clock", "source": ""}}
@@ -19,8 +20,9 @@ class FakeScreen:
     def close(self):
         self.calls.append(("close",))
 
-    def show(self, source, loop, after, owner, ttl, live=None, priority=2, split=False, refresh=None):
+    def show(self, source, loop, after, owner, ttl, live=None, priority=2, split=False, refresh=None, headers=None):
         self.refreshers.append((owner, refresh))
+        self.headers.append((owner, headers))
         self.calls.append(("show", {"source": source, "loop": loop, "after": after, "owner": owner, "ttl": ttl,
                                     **({"live": live} if live is not None else {}),
                                     **({"priority": priority} if priority != 2 else {}), **({"split": True} if split else {})}))
