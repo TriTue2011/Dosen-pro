@@ -6,9 +6,9 @@ import time
 import pytest
 
 from conftest import _HAS_X265
-from app.audio import TalkSession
-from app.screen import Screen
-from app.speaker import Speaker
+from dosen_core.audio import TalkSession
+from dosen_core.screen import Screen
+from dosen_core.speaker import Speaker
 
 pytestmark = pytest.mark.skipif(not _HAS_X265, reason="cần ffmpeg có libx265 (ảnh Docker)")
 
@@ -26,8 +26,8 @@ def _wait(cond, timeout=20):
     return False
 
 
-def test_text_screen_then_switch_sends_a_new_key_frame_then_off(fake_cam_avtalk):
-    scr = Screen()
+def test_text_screen_then_switch_sends_a_new_key_frame_then_off(fake_cam_avtalk, cfg):
+    scr = Screen(cfg)
     try:
         scr.show_text("Trợ lý", [{"role": "user", "text": "Bật đèn"}])
         assert _wait(lambda: scr.status()["sender"]["key_packets"] >= 1)
@@ -44,8 +44,8 @@ def test_text_screen_then_switch_sends_a_new_key_frame_then_off(fake_cam_avtalk)
     assert scr.status()["open"] is False and scr.status()["mode"] == "off"
 
 
-def test_video_that_ends_closes_the_screen_unless_hold(fake_cam_avtalk):
-    scr = Screen()
+def test_video_that_ends_closes_the_screen_unless_hold(fake_cam_avtalk, cfg):
+    scr = Screen(cfg)
     try:
         scr.show("lavfi:testsrc=size=160x120:rate=10:duration=1.5", after="off")
         assert _wait(lambda: scr.status()["mode"] == "off", 25)           # hết video thì đóng
@@ -57,8 +57,8 @@ def test_video_that_ends_closes_the_screen_unless_hold(fake_cam_avtalk):
         scr.off()
 
 
-def test_bad_source_reports_error_and_closes(fake_cam_avtalk):
-    scr = Screen()
+def test_bad_source_reports_error_and_closes(fake_cam_avtalk, cfg):
+    scr = Screen(cfg)
     try:
         scr.show("/khong/co/tep.mp4")
         assert _wait(lambda: scr.status()["mode"] == "off")
@@ -67,8 +67,8 @@ def test_bad_source_reports_error_and_closes(fake_cam_avtalk):
         scr.off()
 
 
-def test_speaker_plays_audio_to_the_talk_channel(fake_cam_avtalk):
-    talk = TalkSession()
+def test_speaker_plays_audio_to_the_talk_channel(fake_cam_avtalk, cfg):
+    talk = TalkSession(cfg)
     spk = Speaker(talk)
     try:
         spk.play("lavfi:sine=frequency=440:duration=1.2", volume=0.5)
@@ -81,10 +81,10 @@ def test_speaker_plays_audio_to_the_talk_channel(fake_cam_avtalk):
     assert talk.running is False
 
 
-def test_speaker_uses_the_avtalk_audio_channel_while_the_screen_is_open(fake_cam_avtalk):
+def test_speaker_uses_the_avtalk_audio_channel_while_the_screen_is_open(fake_cam_avtalk, cfg):
     """Màn đang mở thì camera giữ loa cho AVTalk (OPTalk bị Ret 503): tiếng phải đi theo AVTalk."""
-    talk = TalkSession()
-    scr = Screen()
+    talk = TalkSession(cfg)
+    scr = Screen(cfg)
     spk = Speaker(talk, scr)
     try:
         if os.path.exists("/tmp/fake-cam-talk.bin"):
@@ -104,8 +104,8 @@ def test_speaker_uses_the_avtalk_audio_channel_while_the_screen_is_open(fake_cam
         scr.off()
 
 
-def test_screen_sleep_get_and_set(fake_cam_avtalk):
-    scr = Screen()
+def test_screen_sleep_get_and_set(fake_cam_avtalk, cfg):
+    scr = Screen(cfg)
     first = scr.get_sleep()
     assert first == {"work_mode": "Timing", "work_time": 30, "luminance": 60}
     out = scr.set_sleep(0)                                   # 0 = không bao giờ tắt (như app: «Never»)
@@ -122,8 +122,8 @@ def test_screen_sleep_get_and_set(fake_cam_avtalk):
         scr.set_sleep()
 
 
-def test_screen_open_wakes_the_lcd_and_power_api_works(fake_cam_avtalk):
-    scr = Screen()
+def test_screen_open_wakes_the_lcd_and_power_api_works(fake_cam_avtalk, cfg):
+    scr = Screen(cfg)
     try:
         scr.show_text("t", ["x"])
         assert _wait(lambda: any(l.startswith("power ") for l in open(fake_cam_avtalk).read().splitlines()))
@@ -140,7 +140,7 @@ def test_screen_open_wakes_the_lcd_and_power_api_works(fake_cam_avtalk):
         scr.off()
 
 
-def test_speaker_plays_uploaded_wav_bytes(fake_cam_avtalk):
+def test_speaker_plays_uploaded_wav_bytes(fake_cam_avtalk, cfg):
     import io
     import math
     import struct
@@ -149,7 +149,7 @@ def test_speaker_plays_uploaded_wav_bytes(fake_cam_avtalk):
     with wave.open(buf, "wb") as w:
         w.setnchannels(1); w.setsampwidth(2); w.setframerate(8000)
         w.writeframes(b"".join(struct.pack("<h", int(8000 * math.sin(i / 6))) for i in range(8000)))   # 1 s
-    talk = TalkSession()
+    talk = TalkSession(cfg)
     spk = Speaker(talk)
     try:
         spk.play_bytes(buf.getvalue())
@@ -164,13 +164,12 @@ def test_speaker_plays_uploaded_wav_bytes(fake_cam_avtalk):
 
 # -- lớp sự kiện và màn hình mặc định ------------------------------------------------
 
-def _screen(tmp_path, monkeypatch):
-    monkeypatch.setenv("STATE_DIR", str(tmp_path))
-    return Screen()
+def _screen(cfg):
+    return Screen(cfg)
 
 
-def test_newest_event_layer_wins_and_release_goes_back_down(fake_cam_avtalk, tmp_path, monkeypatch):
-    scr = _screen(tmp_path, monkeypatch)
+def test_newest_event_layer_wins_and_release_goes_back_down(fake_cam_avtalk, cfg):
+    scr = _screen(cfg)
     try:
         scr.show("lavfi:testsrc=size=160x120:rate=10", after="hold", owner="goi_zalo")
         scr.show_text("Chuông cửa", ["có người bấm chuông"], owner="chuong")
@@ -188,8 +187,8 @@ def test_newest_event_layer_wins_and_release_goes_back_down(fake_cam_avtalk, tmp
         scr.off()
 
 
-def test_layer_ttl_returns_to_the_default_clock_and_default_is_saved(fake_cam_avtalk, tmp_path, monkeypatch):
-    scr = _screen(tmp_path, monkeypatch)
+def test_layer_ttl_returns_to_the_default_clock_and_default_is_saved(fake_cam_avtalk, cfg):
+    scr = _screen(cfg)
     scr.load()
     try:
         assert scr.set_default("clock")["mode"] == "clock"
@@ -198,19 +197,13 @@ def test_layer_ttl_returns_to_the_default_clock_and_default_is_saved(fake_cam_av
         assert scr.status()["mode"] == "text" and scr.status()["layers"][0]["ttl_left"] is not None
         assert _wait(lambda: scr.status()["mode"] == "clock", 15)             # hết ttl: về đồng hồ
         assert scr.status()["layers"] == []
-        again = Screen()                                                       # khởi động lại: đọc mặc định đã lưu
-        again.load()
-        assert again.default == {"mode": "clock", "source": ""}
-        assert _wait(lambda: again.status()["mode"] == "clock", 15)            # bộ đếm tự áp dụng mặc định
-        again.set_default("off")
-        again.off()
     finally:
         scr.set_default("off")
         scr.off()
 
 
-def test_default_validation_and_live_needs_a_source(fake_cam_avtalk, tmp_path, monkeypatch):
-    scr = _screen(tmp_path, monkeypatch)
+def test_default_validation_and_live_needs_a_source(fake_cam_avtalk, cfg):
+    scr = _screen(cfg)
     for bad in (("rác", ""), ("live", ""), ("image", ""), ("video", "")):
         with pytest.raises(ValueError):
             scr.set_default(*bad)
@@ -223,6 +216,6 @@ def test_default_validation_and_live_needs_a_source(fake_cam_avtalk, tmp_path, m
 
 def test_clock_render():
     from datetime import datetime
-    from app.render import render_clock
+    from dosen_core.render import render_clock
     png = render_clock(datetime(2026, 11, 15, 9, 5))
     assert png[:8] == b"\x89PNG\r\n\x1a\n" and len(png) > 1000

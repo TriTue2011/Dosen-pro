@@ -4,18 +4,21 @@ Biến màn hình, loa và mic của camera **DOSEN RPO V1** (app iCSee/XM, màn
 cho Home Assistant: phát video từ HA, xem camera khác trực tiếp trên màn, hiện chữ hội thoại của Assist hay tên người gọi Zalo,
 phát nhạc và TTS ra loa, nghe mic.
 
+**Chạy thẳng trong Home Assistant, không cần Docker hay dịch vụ nào khác** (dùng được trên HAOS, Container và Core): tích hợp nói chuyện
+trực tiếp với camera qua DVRIP (cổng 34567), dùng ffmpeg, Pillow và numpy có sẵn của HA; phông chữ DejaVu kèm theo trong tích hợp.
+
 | Phần | Thư mục | Là gì |
 |---|---|---|
-| Dịch vụ Docker | `server/` | HTTP API nói DVRIP với camera (xem `server/README.md`) |
-| Tích hợp HA (custom) | `custom_components/dosen_pro/` | Dịch vụ, thực thể loa (`media_player`) và cảm biến màn hình |
-| Ảnh Docker | `ghcr.io/tritue2011/dosen-pro` | Dựng bằng `.github/workflows/image.yml` |
+| Tích hợp HA | `custom_components/dosen_pro/` | Dịch vụ, thực thể, Assist |
+| Lõi DVRIP | `custom_components/dosen_pro/dosen_core/` | Thuần Python, không phụ thuộc HA (màn hình AVTalk, loa, mic, báo động) |
+| Blueprint | `blueprints/automation/dosen_pro/` | Chiếu video, camera, cuộc gọi Zalo lên màn |
 
 ## Cài đặt
 
-1. **Dịch vụ:** sao chép `server/.env.example` thành `.env`, điền IP, tài khoản, mật khẩu camera (và `API_KEY`), rồi
-   `docker compose up -d` ở thư mục gốc (dùng ảnh GHCR), hoặc `docker compose up -d --build` trong `server/`.
-2. **Tích hợp HA:** HACS → kho tuỳ chỉnh → `https://github.com/TriTue2011/Dosen-pro` → cài *Dosen Pro* → khởi động lại HA →
-   Cài đặt → Thiết bị và dịch vụ → Thêm tích hợp → *Dosen Pro* → điền `http://<máy chạy Docker>:8080` và khoá API.
+1. HACS → kho tuỳ chỉnh → `https://github.com/TriTue2011/Dosen-pro` → cài *Dosen Pro* → khởi động lại HA.
+2. Cài đặt → Thiết bị và dịch vụ → Thêm tích hợp → *Dosen Pro* → điền **IP camera, cổng (34567), tài khoản và mật khẩu camera**.
+   Nên tạo một tài khoản riêng cho Dosen trên camera (phần mềm CMS của hãng); camera sẽ **khoá tài khoản** nếu bị nhập sai mật khẩu nhiều lần.
+   Tích hợp tự chặn đăng nhập dồn dập khi camera từ chối. Đổi IP/tài khoản/mật khẩu sau này: ⋮ → **Cấu hình lại**.
 
 ## Dùng trong Home Assistant
 
@@ -25,7 +28,8 @@ Làm theo khuôn của [ha-camera-talk](https://github.com/TriTue2011/ha-camera-
 |---|---|
 | `assist_satellite.dosen_pro` | Nghe mic camera, chạy pipeline Assist (từ gọi → nhận giọng → hiểu lệnh → trả lời), đọc câu trả lời ra loa camera, hội thoại nối tiếp. **Câu hỏi và câu trả lời hiện lên màn hình camera**, màn tự tắt sau 10 giây. |
 | `media_player.dosen_pro_loa` | `tts.speak`, `media_player.play_media` (URL, tệp, kho media) ra loa camera. |
-| `number.dosen_pro_tang_mic` | Khuếch đại mic 0–30 dB trước khi vào Assist. |
+| `number.dosen_pro_tang_mic` | Khuếch đại mic 0–30 dB (phần mềm) trước khi vào Assist. |
+| `number.dosen_pro_am_luong_loa_camera`, `number.dosen_pro_am_luong_mic_camera`, `switch.dosen_pro_chong_on_mic_camera` | Âm lượng loa, âm lượng mic và chống ồn **của chính camera** (cài đặt thật, app iCSee cũng thấy). Camera mặc định để loa 50%: nhỏ thì tăng lên 100. |
 | `switch.dosen_pro_tat_mic` | Tắt nghe (loa và màn hình vẫn chạy). |
 | `select.dosen_pro_…` | Chọn pipeline Assist; độ nhạy nhận biết «nói xong». |
 | `switch.dosen_pro_hien_hoi_thoai_tren_man_hinh` | Bật/tắt việc hiện hội thoại Assist trên màn hình. |

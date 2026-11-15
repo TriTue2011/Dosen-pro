@@ -92,6 +92,7 @@ class DosenCoordinator(DataUpdateCoordinator):
         self.mic_gain_db = 0.0
         self.show_chat = True
         self.alarm_events_on = True
+        self.audio: dict = {}             # âm lượng loa/mic + chống ồn đọc từ camera (rỗng = chưa đọc)
         # Màn hình mặc định (đặt bởi các thực thể select/text trên thiết bị, khôi phục sau khi khởi động lại).
         self.default_mode: str | None = None
         self.default_camera = ""
@@ -281,7 +282,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.async_create_background_task(hass, coord._alarm_loop(), "dosen_pro alarm events")
     entry.async_on_unload(entry.add_update_listener(_options_updated))
     entry.async_create_background_task(hass, _apply_default_safe(coord), "dosen_pro default screen")
+    entry.async_create_background_task(hass, _read_audio_safe(coord), "dosen_pro read audio")
     return True
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Phiên bản 1 (kiểu dịch vụ Docker: url + khoá API) lên 2 (kết nối thẳng camera). Không đổi được dữ liệu vì thiếu tài
+    khoản camera, nên chỉ nâng số phiên bản; setup sẽ báo «xoá rồi thêm lại» cho tới khi người dùng cấu hình lại."""
+    if entry.version < 2:
+        hass.config_entries.async_update_entry(entry, version=2)
+    return True
+
+
+async def _read_audio_safe(coord: DosenCoordinator) -> None:
+    """Đọc một lần âm lượng loa/mic của camera lúc khởi động (một lần đăng nhập). Lỗi thì để trống, không dồn dập thử lại."""
+    try:
+        coord.audio = await coord.api.audio_get()
+        coord.async_update_listeners()
+    except DosenApiError as exc:
+        _LOGGER.debug("Chưa đọc được âm lượng camera: %s", exc)
 
 
 async def _apply_default_safe(coord: DosenCoordinator) -> None:

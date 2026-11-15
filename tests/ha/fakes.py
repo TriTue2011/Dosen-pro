@@ -103,6 +103,8 @@ class FakeCamera:
         self.cfg, self.now, self.on_alarm = cfg, now, on_alarm
         self.screen, self.speaker, self.mic, self.events = FakeScreen(), FakeSpeaker(), FakeMic(), FakeEvents()
         self.closed = False
+        self.audio = {"speaker": 50, "mic": 50, "anr": True}
+        self.audio_calls = []
         FakeCamera.instances.append(self)
 
     def start(self):
@@ -112,6 +114,16 @@ class FakeCamera:
         if FakeCamera.login_error is not None:
             raise FakeCamera.login_error
         return {"Ret": 100}
+
+    def get_audio(self):
+        return dict(self.audio)
+
+    def set_audio(self, speaker, mic, anr):
+        self.audio_calls.append({"speaker": speaker, "mic": mic, "anr": anr})
+        for k, v in (("speaker", speaker), ("mic", mic), ("anr", anr)):
+            if v is not None:
+                self.audio[k] = v
+        return dict(self.audio)
 
     def close(self):
         self.closed = True

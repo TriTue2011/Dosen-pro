@@ -10,9 +10,8 @@ import struct
 
 import pytest
 
-from app import dvrip, video_sender
-from app.dvrip import DVRIPClient, DVRIPError
-from app.video_sender import WireProtocolNotImplemented
+from dosen_core import dvrip
+from dosen_core.dvrip import DVRIPClient, DVRIPError
 
 
 def _pair():
@@ -219,79 +218,9 @@ def test_talk_send_short_tail_padded():
 
 # -- AV-talk builders ---------------------------------------------------------
 
-def test_encode_camera_bean_h265():
-    bean = video_sender.build_encode_camera_bean(1920, 1080, 30, "H265")
-    assert bean["videoinfo"]["encodetype"] == "H265"
-    assert bean["videoinfo"]["preset"] == 1
-    assert bean["videoinfo"]["qp"] == 50
-    assert bean["videoinfo"]["gopsize"] == 4
-    assert bean["videoinfo"]["srcwidth"] == 1920
-    assert bean["videoinfo"]["dstheight"] == 1080
-    assert bean["audioinfo"]["encodetype"] == "g711a"
-    assert bean["mediatype"] == 0
-    assert bean["timeout"] == 5000
-
-
-def test_encode_camera_bean_h264_defaults():
-    bean = video_sender.build_encode_camera_bean(864, 480, 10, "H264")
-    assert bean["videoinfo"]["preset"] == 2
-    assert bean["videoinfo"]["fps"] == 10
-    with pytest.raises(ValueError):
-        video_sender.build_encode_camera_bean(640, 480, 10, "VP9")
-
-
-def test_frame_info_json():
-    info = json.loads(video_sender.build_frame_info(123456789, 1))
-    assert info == {"timestamp": "123456789", "type": 1}
-    info2 = json.loads(video_sender.build_frame_info(123, 2))
-    assert info2["type"] == 2
-
-
-def test_control_json():
-    assert json.loads(video_sender.build_control_json("video_pause")) == \
-        {"command": "video_pause"}
-    assert json.loads(video_sender.build_control_json(
-        "switching_resolution", 1280, 720)) == {
-        "command": "switching_resolution",
-        "info": {"srcwidth": 1280, "srcheight": 720,
-                 "dstwidth": 1280, "dstheight": 720}}
-    assert video_sender.CONTROL_COMMANDS["reset_encoder_info"] == 13
-    with pytest.raises(ValueError):
-        video_sender.build_control_json("nonsense")
-
-
-def test_apply_decoder_pram():
-    fb = video_sender.apply_decoder_pram(None)
-    assert fb == {"codec": "H264", "width": 864, "height": 480,
-                  "fps": 10, "negotiated": False}
-    got = video_sender.apply_decoder_pram(
-        {"Video": [{"Enc": "H265", "Res": [{"W": 1920, "H": 1080,
-                                            "FPS": 30}]}]})
-    assert got == {"codec": "H265", "width": 1920, "height": 1080,
-                   "fps": 30, "negotiated": True}
-    # Unknown codec falls back to H264 but keeps the resolution.
-    got2 = video_sender.apply_decoder_pram(
-        {"Video": [{"Enc": "VP9", "Res": [{"W": 1280, "H": 720,
-                                           "FPS": 25}]}]})
-    assert got2["codec"] == "H264" and got2["width"] == 1280
-
-
-def test_wire_sender_raises():
-    sender = video_sender.AVTalkWireSender("127.0.0.1")
-    assert sender.implemented is False
-    with pytest.raises(WireProtocolNotImplemented):
-        sender.open(video_sender.build_encode_camera_bean(864, 480, 10))
-    with pytest.raises(WireProtocolNotImplemented):
-        sender.send_frame(b"\x00" * 100, 123, 1)
-    with pytest.raises(WireProtocolNotImplemented):
-        sender.send_control("video_pause")
-    with pytest.raises(WireProtocolNotImplemented):
-        sender.close()
-
-
 def test_login_guard_stops_a_login_storm_after_the_camera_refuses():
     """Camera trả Ret=205 (khoá): các lần đăng nhập kế tiếp bị chặn ngay tại dịch vụ, không chạm camera."""
-    from app.dvrip import DVRIPClient, DVRIPError, login_guard
+    from dosen_core.dvrip import DVRIPClient, DVRIPError, login_guard
 
     class _Fake(DVRIPClient):
         calls = 0

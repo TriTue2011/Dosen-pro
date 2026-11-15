@@ -27,11 +27,16 @@ import threading
 import time
 
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from app import g711  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import load_core  # noqa: E402
+
+load_core.load()
+from dosen_core import g711  # noqa: E402
 
 HOST, PORT = "127.0.0.1", 34567
 SCREEN_WORK = {"WorkMode": "Timing", "WorkTime": 30, "WorkLuminance": 60}   # Dev.ScreenWorkMode
+CONFIGS = {"fVideo.Volume": [{"AudioMode": "Single", "LeftVolume": 50, "RightVolume": 50}],
+           "fVideo.VolumeIn": [{"AnrOpen": True, "AudioMode": "Single", "LeftVolume": 50, "RightVolume": 50}]}
 TALK_LOG = "/tmp/fake-cam-talk.bin"
 AVTALK_LOG = "/tmp/fake-cam-avtalk.log"   # claim JSON + one line per media packet
 
@@ -134,7 +139,12 @@ def handle(conn, addr):
                 req = json.loads(payload[:-2])
                 if req.get("Name") == "Dev.ScreenWorkMode":
                     SCREEN_WORK.update(req["Dev.ScreenWorkMode"])
+                elif req.get("Name") in CONFIGS:
+                    CONFIGS[req["Name"]] = req[req["Name"]]
                 send(json_chunk(1040, {"Name": req.get("Name"), "Ret": 100}, session, seq))
+            elif opcode == 1042 and json.loads(payload[:-2]).get("Name") in CONFIGS:
+                name_ = json.loads(payload[:-2])["Name"]
+                send(json_chunk(1042, {"Name": name_, name_: CONFIGS[name_], "Ret": 100}, session, seq))
             elif opcode == 1042 and json.loads(payload[:-2]).get("Name") == "Dev.ScreenWorkMode":
                 send(json_chunk(1042, {"Name": "Dev.ScreenWorkMode", "Dev.ScreenWorkMode": dict(SCREEN_WORK),
                                        "Ret": 100}, session, seq))

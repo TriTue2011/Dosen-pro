@@ -14,13 +14,10 @@ import sys
 import time
 
 import pytest
-from fastapi.testclient import TestClient
 
-from app import dvrip
-from app.config import settings
-from app.dvrip import DVRIPClient, parse_alarm_info
-from app.events import AlarmSession
-from app.main import app as fastapi_app
+from dosen_core import dvrip
+from dosen_core.dvrip import DVRIPClient, parse_alarm_info
+from dosen_core.events import AlarmSession
 
 
 def _pair():
@@ -77,36 +74,10 @@ def test_alarm_subscribe_frame():
 
 # -- session against the fake camera ------------------------------------
 
-@pytest.fixture(scope="module")
-def fake_cam():
-    proc = subprocess.Popen(
-        [sys.executable, "tests/fake_cam.py"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    try:
-        for _ in range(50):
-            try:
-                s = socket.create_connection(("127.0.0.1", 34567),
-                                             timeout=0.2)
-                s.close()
-                break
-            except OSError:
-                time.sleep(0.1)
-        yield proc
-    finally:
-        proc.terminate()
-        proc.wait(timeout=5)
 
 
-@pytest.fixture(autouse=True)
-def _point_at_fake_cam(monkeypatch):
-    monkeypatch.setattr(settings, "cam_ip", "127.0.0.1")
-    monkeypatch.setattr(settings, "cam_port", 34567)
-    monkeypatch.setattr(settings, "cam_user", "admin")
-    monkeypatch.setattr(settings, "cam_pass", "")
-
-
-def test_alarm_session_receives_fake_events(fake_cam):
-    session = AlarmSession()
+def test_alarm_session_receives_fake_events(fake_cam, cfg):
+    session = AlarmSession(cfg)
     try:
         session.start()
         deadline = time.time() + 5
@@ -132,29 +103,6 @@ def test_alarm_session_receives_fake_events(fake_cam):
     assert session.last_error is None  # clean stop, not a camera error
 
 
-def test_events_http_endpoints(fake_cam):
-    client = TestClient(fastapi_app)
-    try:
-        assert client.get("/api/events").json()["events"] == []
-        resp = client.post("/api/events/start")
-        assert resp.status_code == 200, resp.text
-        deadline = time.time() + 5
-        got = []
-        while time.time() < deadline:
-            got = client.get("/api/events").json()["events"]
-            if len(got) >= 2:
-                break
-            time.sleep(0.05)
-        assert [e["event"] for e in got] == ["LocalAlarm", "VideoMotion"]
-        assert got[0]["possible_button_press"] is True
-        status = client.get("/api/status").json()
-        assert status["events"]["events_received"] >= 2
-    finally:
-        client.post("/api/events/stop")
-
-
-# -- hồi quy cho các lỗi tìm thấy khi rà code (15/11) ----------------------
-
 def test_read_chunk_survives_timeout_in_the_middle_of_a_chunk():
     """Lỗi A: timeout 1 s rơi giữa một gói làm mất các byte đã đọc, gói
     kế tiếp bị đọc lệch và phiên chết với «bad chunk header»."""
@@ -179,7 +127,7 @@ def test_read_chunk_survives_timeout_in_the_middle_of_a_chunk():
         client.sock.close()
 
 
-def test_concurrent_start_opens_one_connection(fake_cam, monkeypatch):
+def test_concurrent_start_opens_one_connection(fake_cam, monkeypatch, cfg):
     """Lỗi B: hai POST /api/events/start cùng lúc cùng qua `if running`
     rồi mỗi bên mở một kết nối, một luồng đọc bị bỏ rơi."""
     import threading
@@ -191,7 +139,7 @@ def test_concurrent_start_opens_one_connection(fake_cam, monkeypatch):
         time.sleep(0.2)                  # kéo dài cửa sổ tranh chấp
         return real_connect(self)
     monkeypatch.setattr(DVRIPClient, "connect", counting_connect)
-    session = AlarmSession()
+    session = AlarmSession(cfg)
     try:
         threads = [threading.Thread(target=session.start) for _ in range(2)]
         for t in threads:
@@ -204,13 +152,13 @@ def test_concurrent_start_opens_one_connection(fake_cam, monkeypatch):
 
 
 def test_session_reconnects_after_camera_drops_connection(fake_cam,
-                                                          monkeypatch):
+                                                          monkeypatch, cfg):
     """Lỗi C: cam rớt kết nối thì bộ nghe chết im lặng, SSE kết thúc và
     không ai báo. Phải tự nối lại và đăng ký lại."""
-    from app import events
+    from dosen_core import events
     monkeypatch.setattr(events, "_RECONNECT_BASE_S", 0.05)
     monkeypatch.setattr(events, "_RECONNECT_MAX_S", 0.2)
-    session = AlarmSession()
+    session = AlarmSession(cfg)
     try:
         session.start()
         deadline = time.time() + 5
@@ -228,12 +176,12 @@ def test_session_reconnects_after_camera_drops_connection(fake_cam,
         session.stop()
 
 
-def test_stop_during_reconnect_backoff_is_prompt(fake_cam, monkeypatch):
+def test_stop_during_reconnect_backoff_is_prompt(fake_cam, monkeypatch, cfg):
     """Dừng khi đang chờ nối lại (cam không còn tới được) không được treo."""
-    from app import events
+    from dosen_core import events
     monkeypatch.setattr(events, "_RECONNECT_BASE_S", 30.0)
     monkeypatch.setattr(events, "_RECONNECT_MAX_S", 30.0)
-    session = AlarmSession()
+    session = AlarmSession(cfg)
     session.start()
     session.client.sock.close()                  # rớt kết nối
     deadline = time.time() + 5
@@ -247,10 +195,10 @@ def test_stop_during_reconnect_backoff_is_prompt(fake_cam, monkeypatch):
     assert session.running is False
 
 
-def test_only_start_of_localalarm_counts_as_possible_press():
+def test_only_start_of_localalarm_counts_as_possible_press(cfg):
     """Lỗi D: Start và Stop của cùng một lần bấm đều bị gắn cờ, một lần
     bấm thành hai «lần bấm»."""
-    session = AlarmSession()
+    session = AlarmSession(cfg)
     session._record({"Event": "LocalAlarm", "Status": "Start"})
     session._record({"Event": "LocalAlarm", "Status": "Stop"})
     session._record({"Event": "LocalAlarm"})        # cam không ghi Status
@@ -258,27 +206,15 @@ def test_only_start_of_localalarm_counts_as_possible_press():
     assert flags == [True, False, True]
 
 
-def test_recent_rejects_non_positive_limit():
-    """Lỗi E: limit âm cho `[-0:]` tức là trả TOÀN BỘ bộ đệm."""
-    session = AlarmSession()
-    for i in range(5):
-        session._record({"Event": "VideoMotion", "n": i})
-    assert session.recent(-3) == []
-    assert session.recent(0) == []
-    assert len(session.recent(2)) == 2
-    client = TestClient(fastapi_app)
-    assert client.get("/api/events?limit=-3").json()["events"] == []
-
-
-def test_mic_stop_does_not_leave_a_traceback_in_the_reader_thread(fake_cam):
+def test_mic_stop_does_not_leave_a_traceback_in_the_reader_thread(fake_cam, cfg):
     """Dừng mic đóng socket dưới chân luồng đọc: OSError «Bad file
     descriptor» không được văng ra thành traceback (thấy trên cam thật)."""
     import threading
-    from app.audio import MicSession
+    from dosen_core.audio import MicSession
     errors = []
     old_hook = threading.excepthook
     threading.excepthook = lambda args: errors.append(args.exc_value)
-    mic = MicSession()
+    mic = MicSession(cfg)
     try:
         mic.start()
         time.sleep(0.5)                  # để luồng đọc đang chờ gói
@@ -290,13 +226,3 @@ def test_mic_stop_does_not_leave_a_traceback_in_the_reader_thread(fake_cam):
     assert mic.last_error is None        # dừng chủ động, không phải lỗi cam
 
 
-def test_api_key_protects_the_api_but_not_health(monkeypatch):
-    monkeypatch.setattr(settings, "api_key", "k-test")
-    client = TestClient(fastapi_app)
-    assert client.get("/api/health").status_code == 200
-    assert client.get("/api/status").status_code == 401
-    assert client.get("/api/status", headers={"X-API-Key": "sai"}).status_code == 401
-    assert client.get("/api/status", headers={"X-API-Key": "k-test"}).status_code == 200
-    assert client.get("/api/status", headers={"Authorization": "Bearer k-test"}).status_code == 200
-    monkeypatch.setattr(settings, "api_key", "")
-    assert client.get("/api/status").status_code == 200

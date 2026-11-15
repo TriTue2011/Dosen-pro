@@ -9,7 +9,7 @@ from homeassistant.setup import async_setup_component
 from homeassistant.util import yaml as yaml_util
 from pytest_homeassistant_custom_component.common import async_mock_service
 
-BP = pathlib.Path(__file__).parent.parent / "blueprints" / "automation" / "dosen_pro"
+BP = pathlib.Path(__file__).parent.parent.parent / "blueprints" / "automation" / "dosen_pro"
 
 
 def _bp(name):

@@ -32,6 +32,61 @@ class Camera:
         finally:
             client.close()
 
+    # -- âm lượng loa / mic của chính camera (cài đặt thật, app iCSee cũng thấy) ------------------
+    _SPK, _MIC = "fVideo.Volume", "fVideo.VolumeIn"
+
+    def _control(self) -> DVRIPClient:
+        client = DVRIPClient(self.cfg.cam_ip, self.cfg.cam_port, self.cfg.dvrip_connect_timeout,
+                             self.cfg.dvrip_read_timeout)
+        try:
+            client.connect()
+            client.login(self.cfg.cam_user, self.cfg.cam_pass)
+        except Exception:
+            client.close()
+            raise
+        return client
+
+    @staticmethod
+    def _first(reply: dict, name: str) -> dict:
+        v = reply.get(name)
+        return dict(v[0]) if isinstance(v, list) and v and isinstance(v[0], dict) else {}
+
+    def get_audio(self) -> dict:
+        """{"speaker": 0..100, "mic": 0..100, "anr": bool|None} đọc từ camera (một lần đăng nhập)."""
+        client = self._control()
+        try:
+            spk = self._first(client.get_config(self._SPK), self._SPK)
+            mic = self._first(client.get_config(self._MIC), self._MIC)
+        finally:
+            client.close()
+        return {"speaker": spk.get("LeftVolume"), "mic": mic.get("LeftVolume"), "anr": mic.get("AnrOpen")}
+
+    def set_audio(self, speaker: int | None = None, mic: int | None = None, anr: bool | None = None) -> dict:
+        """Đặt âm lượng loa / mic (0..100) và chống ồn mic. Chỉ đổi phần được truyền; các trường khác giữ nguyên."""
+        for name, v in (("speaker", speaker), ("mic", mic)):
+            if v is not None and (not isinstance(v, int) or isinstance(v, bool) or not 0 <= v <= 100):
+                raise ValueError(f"{name} must be an integer 0..100")
+        if anr is not None and not isinstance(anr, bool):
+            raise ValueError("anr must be true or false")
+        if speaker is None and mic is None and anr is None:
+            raise ValueError("give speaker, mic and/or anr")
+        client = self._control()
+        try:
+            if speaker is not None:
+                cur = self._first(client.get_config(self._SPK), self._SPK) or {"AudioMode": "Single"}
+                cur["LeftVolume"] = cur["RightVolume"] = speaker
+                client.set_config(self._SPK, [cur])
+            if mic is not None or anr is not None:
+                cur = self._first(client.get_config(self._MIC), self._MIC) or {"AudioMode": "Single"}
+                if mic is not None:
+                    cur["LeftVolume"] = cur["RightVolume"] = mic
+                if anr is not None:
+                    cur["AnrOpen"] = anr
+                client.set_config(self._MIC, [cur])
+        finally:
+            client.close()
+        return self.get_audio()
+
     def close(self) -> None:
         for part in (self.events, self.speaker, self.mic, self.talk):
             try:

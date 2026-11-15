@@ -7,7 +7,7 @@ decode(0x55) = -8.
 
 import math
 
-from app import g711
+from dosen_core import g711
 
 
 def test_known_vectors():

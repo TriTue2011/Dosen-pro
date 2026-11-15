@@ -4,8 +4,8 @@ import struct
 
 import pytest
 
-from app import avtalk
-from app.avtalk import HevcSplitter
+from dosen_core import avtalk
+from dosen_core.avtalk import HevcSplitter
 
 
 def _nal(nal_type: int, payload: bytes = b"\x11\x22") -> bytes:
@@ -62,39 +62,3 @@ def test_splitter_is_chunking_independent():
     assert [k for k, _ in whole] == [True, False, False]
 
 
-# -- đầu-cuối với camera giả (cần ffmpeg + libx265: có trong ảnh Docker) ------
-
-import json
-import time
-
-from conftest import _HAS_X265
-from app.video import VideoPipeline
-
-
-@pytest.mark.skipif(not _HAS_X265, reason="cần ffmpeg có libx265 (ảnh Docker)")
-def test_pipeline_sends_h265_to_the_camera(fake_cam_avtalk):
-    p = VideoPipeline()
-    p.start("lavfi:testsrc=size=320x240:rate=10", width=240, height=320, fps=10,
-            codec="H265", send=True)
-    deadline = time.time() + 20
-    while time.time() < deadline and p.status()["video_send"].get("video_packets", 0) < 25:
-        time.sleep(0.2)
-    status = p.status()
-    p.stop()
-    lines = open(fake_cam_avtalk).read().splitlines()
-    claim = json.loads(next(l for l in lines if l.startswith("claim "))[6:])
-    assert claim["AVTalk"]["Action"] == "Claim"
-    assert claim["AVTalk"]["Video"] == {"Enc": "H265", "W": 240, "H": 320, "FPS": 10}
-    start = json.loads(next(l for l in lines if l.startswith("start "))[6:])
-    assert start["AVTalk"]["Action"] == "Start"               # lệnh Start trên kết nối điều khiển
-    assert start["SessionID"] == claim["SessionID"]           # cùng một phiên
-    media = [l.split() for l in lines if l.startswith("media ")]
-    kinds = [m[1][:8] for m in media]
-    assert kinds[0] == "000001fc" or "000001fa" == kinds[0]   # audio may lead
-    video = [k for k in kinds if k in ("000001fc", "000001fd")]
-    assert video and video[0] == "000001fc"                   # first video = key frame
-    assert "000001fa" in kinds                                # silent audio between
-    key_hdr = next(m[1] for m in media if m[1].startswith("000001fc"))
-    assert key_hdr[8:16] == "030a1e28"                        # H265 10fps 240x320
-    assert status["video_send"]["state"] == "sending"
-    assert status["video_send"]["video_packets"] >= 25

@@ -1,4 +1,4 @@
-# Kiểm thử: dịch vụ Docker (server/) và tích hợp Home Assistant (custom_components/).
+# Kiểm thử: lõi DVRIP (camera giả, ffmpeg thật) và tích hợp Home Assistant.
 name: CI
 
 on:
@@ -11,23 +11,22 @@ permissions:
   contents: read
 
 jobs:
-  server:
+  core:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-      - name: Cài ffmpeg (có libx265) như ảnh Docker
+          python-version: '3.13'
+      - name: Cài ffmpeg (có libx265)
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core
-      - run: pip install -r server/requirements.txt
-      - name: Test dịch vụ (camera giả, ffmpeg thật)
-        working-directory: server
-        run: python -m pytest tests -q
+          sudo apt-get install -y --no-install-recommends ffmpeg
+      - run: pip install pytest Pillow
+      - name: Test lõi (camera giả)
+        run: python -m pytest tests/core -q -p no:asyncio
 
-  custom:
+  integration:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -36,4 +35,4 @@ jobs:
           python-version: '3.13'
       - run: pip install pytest-homeassistant-custom-component
       - name: Test tích hợp Home Assistant
-        run: python -m pytest tests -q
+        run: python -m pytest tests/ha -q

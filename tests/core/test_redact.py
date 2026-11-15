@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from app.video import VideoPipeline, redact_source
+from dosen_core.util import redact_source
 
 SECRET = "fake-secret-pw"   # chuỗi giả, không phải mật khẩu thật
 
@@ -21,15 +21,3 @@ def test_redacts_query_password_and_userinfo():
     assert redact_source("/tmp/clip.mp4") == "/tmp/clip.mp4"
 
 
-@pytest.mark.skipif(shutil.which("ffmpeg") is None,
-                    reason="cần ffmpeg (có trong ảnh Docker)")
-def test_status_and_last_error_do_not_leak_the_password():
-    p = VideoPipeline()
-    # nguồn hỏng: ffmpeg báo lỗi kèm đúng chuỗi nguồn
-    p.start("rtsp://admin:%s@127.0.0.1:9/none" % SECRET,
-            width=64, height=48, fps=5, codec="H264")
-    deadline = time.time() + 15
-    while p.running and time.time() < deadline:
-        time.sleep(0.1)
-    p.stop()
-    assert SECRET not in repr(p.status()), p.status()

@@ -4,7 +4,7 @@ import io
 
 from PIL import Image
 
-from app.render import HEIGHT, WIDTH, render_screen
+from dosen_core.render import HEIGHT, WIDTH, render_screen
 
 
 def _img(png):

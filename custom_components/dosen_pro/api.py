@@ -68,6 +68,14 @@ class LocalApi:
     async def screen_sleep(self, seconds: int | None = None, luminance: int | None = None) -> dict[str, Any]:
         return await self._run(self.camera.screen.set_sleep, seconds, luminance)
 
+    # -- âm lượng loa / mic của camera ------------------------------------------
+    async def audio_get(self) -> dict[str, Any]:
+        return await self._run(self.camera.get_audio)
+
+    async def audio_set(self, speaker: int | None = None, mic: int | None = None,
+                        anr: bool | None = None) -> dict[str, Any]:
+        return await self._run(self.camera.set_audio, speaker, mic, anr)
+
     # -- loa ----------------------------------------------------------------
     async def speaker_play(self, source: str, volume: float = 1.0) -> dict[str, Any]:
         return await self._run(self.camera.speaker.play, source, volume)
