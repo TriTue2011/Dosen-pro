@@ -19,7 +19,7 @@ from datetime import datetime
 
 from . import avtalk, render
 from .dvrip import DVRIPClient, DVRIPError
-from .util import redact_source, apply_decoder_pram
+from .util import apply_decoder_pram, reap_async, redact_source
 
 log = logging.getLogger("icsee.screen")
 
@@ -414,12 +414,9 @@ class Screen:
 
     def _stop_encoder(self) -> None:
         self._token += 1
-        if self._proc is not None:
-            try:
-                self._proc.terminate()
-            except OSError:
-                pass
-            self._proc = None
+        proc, self._proc = self._proc, None
+        if proc is not None:
+            reap_async(proc)
 
     def _pump(self, proc: subprocess.Popen, token: int) -> None:
         splitter = avtalk.HevcSplitter()

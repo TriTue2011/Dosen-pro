@@ -284,3 +284,32 @@ def test_weather_on_the_clock_redraws_it_and_bad_input_is_refused(fake_cam_avtal
     finally:
         scr.off()
         scr.close()
+
+
+def _stubborn_ffmpeg(tmp_path):
+    """ffmpeg giả: lờ tín hiệu dừng và ghi dữ liệu liên tục tới khi ống đầy — đúng cảnh ffmpeg kẹt đo được trong HA."""
+    p = tmp_path / "ffmpeg-cung-dau"
+    p.write_text("#!/usr/bin/env python3\nimport signal, sys\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                 "while True:\n    sys.stdout.buffer.write(b'\\0' * 65536)\n    sys.stdout.buffer.flush()\n")
+    p.chmod(0o755)
+    return str(p)
+
+
+def test_switching_source_really_stops_the_old_encoder_even_if_it_ignores_sigterm(fake_cam_avtalk, cfg, tmp_path):
+    """Lỗi đo trên máy thật: đổi nguồn chỉ terminate() → ffmpeg đang kẹt không tắt → dồn sáu bộ mã hoá, màn live đen."""
+    cfg.ffmpeg = _stubborn_ffmpeg(tmp_path)
+    scr = Screen(cfg)
+    olds = []
+    try:
+        for i in range(4):
+            scr.show(f"http://x/{i}.mp4", after="hold", owner=f"o{i}")        # mỗi lần đổi là một bộ mã hoá mới
+            assert _wait(lambda: scr._proc is not None)
+            olds.append(scr._proc)
+            time.sleep(0.3)
+        for old in olds[:-1]:
+            assert _wait(lambda old=old: old.poll() is not None, 10), "bộ mã hoá cũ vẫn còn chạy"
+        assert olds[-1].poll() is None                                          # bộ mới nhất vẫn chạy
+    finally:
+        scr.off()
+        scr.close()
+    assert _wait(lambda: olds[-1].poll() is not None, 10)                       # tắt màn thì bộ cuối cũng dừng, không để ma

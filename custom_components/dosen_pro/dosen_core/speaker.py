@@ -17,7 +17,7 @@ import time
 
 from .audio import TalkSession
 from .dvrip import DVRIPError
-from .util import redact_source
+from .util import reap_async, redact_source
 
 log = logging.getLogger("icsee.speaker")
 _CHUNK = 640            # 40 ms of PCM16 at 8 kHz = one talk packet
@@ -189,12 +189,9 @@ class Speaker:
             self._stream.closed = True
             self._stream = None
         self._token += 1
-        if self._proc is not None:
-            try:
-                self._proc.terminate()
-            except OSError:
-                pass
-            self._proc = None
+        proc, self._proc = self._proc, None
+        if proc is not None:
+            reap_async(proc)
         self.playing = False
 
     def stop(self) -> dict:

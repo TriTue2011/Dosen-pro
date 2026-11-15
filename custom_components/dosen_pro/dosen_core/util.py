@@ -45,3 +45,23 @@ def apply_decoder_pram(pram: dict | None) -> dict:
                 "fps": fps, "negotiated": True}
     except (TypeError, ValueError, IndexError, KeyError):
         return fallback
+
+
+def reap_async(proc) -> None:
+    """Dừng hẳn một tiến trình ffmpeg đã thôi được đọc đầu ra và thu dọn nó, không chặn người gọi.
+
+    Chỉ ``terminate()`` là không đủ: ffmpeg đang kẹt khi ghi vào ống đã đầy (không còn ai đọc) không xử lý được tín hiệu,
+    nên mỗi lần đổi nguồn lại để sót một bộ mã hoá chạy mãi (đo 15/11: sáu bộ cùng lúc làm màn live đen vì tranh CPU).
+    Nên ``kill()`` rồi ``wait()`` ở luồng riêng để không thành tiến trình ma."""
+    import threading
+
+    def _go() -> None:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+        try:
+            proc.wait(timeout=10)
+        except Exception:                          # noqa: BLE001 — không còn gì làm thêm được
+            pass
+    threading.Thread(target=_go, daemon=True, name="ffmpeg-reap").start()
