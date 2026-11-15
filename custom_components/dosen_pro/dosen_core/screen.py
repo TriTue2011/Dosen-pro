@@ -433,32 +433,37 @@ class Screen:
                 for is_key, au in splitter.feed(chunk):
                     sender.push(is_key, au)
         finally:
-            with self._lock:
-                if token != self._token:
-                    return
-                err = b""
-                try:
-                    err = proc.stderr.read() or b""
-                except (OSError, ValueError):
-                    pass
-                if err.strip():
-                    self.last_error = redact_source(err.decode("utf-8", "replace").strip())
-                    log.warning("man hinh: ffmpeg: %s", self.last_error)
-                self._proc = None
-                layer = self._cur_layer
-                if layer is None:
-                    return
-                is_default = layer["owner"] == "default"
-                if is_default and layer["mode"] == "live":
-                    self._retry_at = time.monotonic() + 5       # camera stream dropped: try again soon
-                    self._cur_key = None
-                elif layer["after"] == "off" or (self.last_error and not is_default):
-                    log.info("man hinh: nguon ket thuc (%s), xuong lop duoi", layer["owner"])
-                    self._layers = [l for l in self._layers if l is not layer]
-                    self._cur_key = None
-                    self._apply_quiet()
-                else:
-                    layer["ended"] = True              # hold: keep the last frame
+            self._pump_finished(proc, token)
+
+
+    def _pump_finished(self, proc, token: int) -> None:
+        """Dọn sau khi luồng đọc kết thúc. Tách riêng (không để ``return`` trong ``finally``: Python 3.14 cảnh báo)."""
+        with self._lock:
+            if token != self._token:
+                return
+            err = b""
+            try:
+                err = proc.stderr.read() or b""
+            except (OSError, ValueError):
+                pass
+            if err.strip():
+                self.last_error = redact_source(err.decode("utf-8", "replace").strip())
+                log.warning("man hinh: ffmpeg: %s", self.last_error)
+            self._proc = None
+            layer = self._cur_layer
+            if layer is None:
+                return
+            is_default = layer["owner"] == "default"
+            if is_default and layer["mode"] == "live":
+                self._retry_at = time.monotonic() + 5       # camera stream dropped: try again soon
+                self._cur_key = None
+            elif layer["after"] == "off" or (self.last_error and not is_default):
+                log.info("man hinh: nguon ket thuc (%s), xuong lop duoi", layer["owner"])
+                self._layers = [l for l in self._layers if l is not layer]
+                self._cur_key = None
+                self._apply_quiet()
+            else:
+                layer["ended"] = True              # hold: keep the last frame
 
     def _apply_quiet(self) -> None:
         try:

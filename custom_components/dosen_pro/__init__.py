@@ -338,7 +338,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     def _bao_dong(record: dict) -> None:                       # chạy trong luồng của lõi → đưa về vòng lặp HA
         coord_ = holder.get("coord")
         if coord_ is not None:
-            hass.loop.call_soon_threadsafe(coord_._on_alarm_event, record)
+            try:
+                hass.loop.call_soon_threadsafe(coord_._on_alarm_event, record)
+            except RuntimeError:                                # vòng lặp HA đã đóng (đang tắt/khởi động lại): bỏ qua, không ghi ERROR
+                pass
     camera = Camera(cfg, now=dt_util.now, on_alarm=_bao_dong)
     camera.start()
     coord = DosenCoordinator(hass, entry, LocalApi(camera))

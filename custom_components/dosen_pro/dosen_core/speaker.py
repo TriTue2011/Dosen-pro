@@ -166,23 +166,28 @@ class Speaker:
                 self.last_error = f"send failed: {exc}"
                 log.warning("loa: %s", self.last_error)
         finally:
-            with self._lock:
-                if token != self._token:
-                    return
-                try:
-                    err = proc.stderr.read() or b""
-                except (OSError, ValueError):
-                    err = b""
-                if err.strip() and not self.last_error:
-                    self.last_error = redact_source(err.decode("utf-8", "replace").strip())
-                    log.warning("loa: ffmpeg: %s", self.last_error)
-                self.playing = False
-                self._proc = None
-                if self._we_started_talk:
-                    time.sleep(0.3)             # let the camera drain its buffer
-                    self._talk.stop()
-                    self._we_started_talk = False
-                log.info("loa: xong (%d byte)", self.bytes_sent)
+            self._pump_finished(proc, token)
+
+
+    def _pump_finished(self, proc, token: int) -> None:
+        """Dọn sau khi luồng đọc kết thúc. Tách riêng (không để ``return`` trong ``finally``: Python 3.14 cảnh báo)."""
+        with self._lock:
+            if token != self._token:
+                return
+            try:
+                err = proc.stderr.read() or b""
+            except (OSError, ValueError):
+                err = b""
+            if err.strip() and not self.last_error:
+                self.last_error = redact_source(err.decode("utf-8", "replace").strip())
+                log.warning("loa: ffmpeg: %s", self.last_error)
+            self.playing = False
+            self._proc = None
+            if self._we_started_talk:
+                time.sleep(0.3)             # let the camera drain its buffer
+                self._talk.stop()
+                self._we_started_talk = False
+            log.info("loa: xong (%d byte)", self.bytes_sent)
 
     def _stop_proc(self) -> None:
         if self._stream is not None:                   # phát nguồn khác / dừng: luồng trực tiếp cũ hết hiệu lực
