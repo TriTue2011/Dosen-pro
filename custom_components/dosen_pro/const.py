@@ -25,6 +25,7 @@ FIT_OPTIONS = {"Vừa khung (có viền)": "contain", "Lấp đầy (cắt rìa)
 CONF_INTERCOM_KEY = "intercom_key"   # khoá trong địa chỉ bộ đàm (Zalo Call đọc từ dữ liệu mục cấu hình, như loa R1)
 RTSP_PORT = 554
 RTSP_STREAM = 1                      # 0 = luồng chính, 1 = luồng phụ (800x448 HEVC + tiếng A-law, đo trên camera thật)
+QUALITY_OPTIONS = {"Chuẩn": "standard", "Cao": "high", "Cao nhất (thử, có thể đen)": "max"}
 NONE_OPTION = "—"                  # «chưa chọn» trong các ô chọn camera/ảnh
 
 

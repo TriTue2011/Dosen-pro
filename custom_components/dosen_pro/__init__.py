@@ -96,6 +96,7 @@ class DosenCoordinator(DataUpdateCoordinator):
         # Trạng thái chạy của vệ tinh Assist (đặt bởi các thực thể công tắc/số).
         self.mic_muted = False
         self._default_lock = asyncio.Lock()
+        self.startup_done = asyncio.Event()      # lần áp màn mặc định lúc khởi động đã xong (thành công hay bỏ cuộc)
         self.in_call = False              # bộ đàm đang đưa tiếng cuộc gọi ra loa: vệ tinh Assist ngừng nghe
         self.mic_gain_db = 0.0
         self.show_chat = True
@@ -106,6 +107,7 @@ class DosenCoordinator(DataUpdateCoordinator):
         self.default_camera = ""
         self.default_image = ""
         self.default_text = ""
+        self.default_quality = "standard"        # chất lượng mã hoá hình lên màn camera (standard | high | max)
         self.default_weather = ""                # thực thể weather.* hiện trên đồng hồ ("" = không hiện)
         self._unsub_weather = None
         self.default_rotate = 0                  # xoay hình (độ, theo chiều kim đồng hồ) cho mọi lớp không tự nêu
@@ -408,12 +410,20 @@ DEFAULT_RETRY_DELAYS = (0, 5, 10, 20, 30, 60, 60)
 
 
 async def _apply_default_safe(coord: DosenCoordinator) -> None:
+    try:
+        await _apply_default_with_retries(coord)
+    finally:
+        coord.startup_done.set()
+
+
+async def _apply_default_with_retries(coord: DosenCoordinator) -> None:
     last: Exception | None = None
     for delay in DEFAULT_RETRY_DELAYS:
         if delay:
             await asyncio.sleep(delay)
         try:
             await coord.api.screen_view(coord.default_rotate, coord.default_fit)     # khôi phục xoay/khung đã chọn trước khi tắt HA
+            await coord.api.screen_quality(coord.default_quality)
             coord.track_weather()
             await coord.push_weather()
             await coord.apply_default()

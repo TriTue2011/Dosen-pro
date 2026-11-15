@@ -11,7 +11,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api import DosenApiError
-from .const import DEFAULT_MODES, DOMAIN, FIT_OPTIONS, NONE_OPTION, ROTATE_OPTIONS, device_info
+from .const import DEFAULT_MODES, DOMAIN, FIT_OPTIONS, NONE_OPTION, QUALITY_OPTIONS, ROTATE_OPTIONS, device_info
 from .entity import DosenEntity
 
 
@@ -19,7 +19,7 @@ async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities) -> N
     c = hass.data[DOMAIN][entry.entry_id]
     async_add_entities([DosenPipelineSelect(hass, c), DosenVadSelect(hass, c), DosenDefaultScreen(c),
                         DosenDefaultCamera(c), DosenDefaultImage(c), DosenDefaultWeather(c), DosenDefaultRotate(c),
-                        DosenDefaultFit(c)])
+                        DosenDefaultFit(c), DosenQuality(c)])
 
 
 class DosenPipelineSelect(DosenEntity, AssistPipelineSelect):
@@ -208,3 +208,33 @@ class DosenDefaultFit(_ViewSelect):
 
     def _to_option(self, value: str) -> str:
         return next(label for label, v in FIT_OPTIONS.items() if v == value)
+
+
+class DosenQuality(_RestoreSelect):
+    """Chất lượng mã hoá hình lên màn camera. «Chuẩn» là bộ mã hoá đã chạy tốt; hai mức cao hơn để thử (màn đen = quay lại «Chuẩn»)."""
+
+    _attr_options = list(QUALITY_OPTIONS)
+    _attr_entity_category = None
+
+    def __init__(self, coordinator) -> None:
+        super().__init__(coordinator, "screen_quality", "Chất lượng hình trên màn")
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        cu = await self.async_get_last_state()
+        if cu is not None and cu.state in QUALITY_OPTIONS:
+            self.coordinator.default_quality = QUALITY_OPTIONS[cu.state]
+
+    @property
+    def current_option(self) -> str:
+        return next(label for label, v in QUALITY_OPTIONS.items() if v == self.coordinator.default_quality)
+
+    async def async_select_option(self, option: str) -> None:
+        before = self.coordinator.default_quality
+        self.coordinator.default_quality = QUALITY_OPTIONS[option]
+        try:
+            await self.coordinator.api.screen_quality(self.coordinator.default_quality)
+        except DosenApiError as exc:
+            self.coordinator.default_quality = before
+            raise HomeAssistantError(f"Dosen Pro: {exc}") from exc
+        self.async_write_ha_state()

@@ -37,6 +37,10 @@ class FakeScreen:
                                        **({"fit": fit} if fit is not None else {})}))
         return self._status
 
+    def set_quality(self, quality):
+        self.calls.append(("quality", quality))
+        return self._status
+
     def set_weather(self, weather):
         self.calls.append(("weather", weather))
         return self._status

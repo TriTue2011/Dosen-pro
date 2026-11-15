@@ -40,13 +40,29 @@ def check_view(rotate, fit) -> None:
         raise ValueError("fit must be 'contain' or 'cover'")
 
 
-def build_hevc_cmd(source: str, width: int, height: int, fps: int,
-                   loop: bool = False, ffmpeg: str = "ffmpeg", rotate: int = 0, fit: str = "contain") -> list[str]:
-    """ffmpeg command: any source -> rotated, fitted H.265 Annex-B on stdout.
+#: Mức chất lượng mã hoá. «standard» GIỮ NGUYÊN bộ mã hoá đã chạy tốt trên camera này (x265 ultrafast: khối tối đa 32, không SAO).
+#: «high» chỉ đổi tốc độ bit (cùng công cụ nên chip giải mã của camera vẫn đọc được). «max» đổi cả preset sang slow (khối 64,
+#: SAO, rdoq…) — ĐẸP NHẤT nhưng chip giải mã của camera có thể không đọc được (đo 15/11: màn bật rồi đen) nên chỉ để thử.
+QUALITIES = ("standard", "high", "max")
+_QUALITY = {
+    "standard": {"preset": "ultrafast", "crf": None, "vbv": 400, "gop_seconds": 4},
+    "high": {"preset": "ultrafast", "crf": 18, "vbv": 1500, "gop_seconds": 4},
+    "max": {"preset": "slow", "crf": 14, "vbv": 3000, "gop_seconds": 2},
+}
 
-    Chất lượng cao nhất mà màn 240x320 cần: thu nhỏ bằng lanczos, x265 preset slow, crf 14 (khung giới hạn
-    3 Mbps để đường truyền tới camera không nghẽn), khung khoá mỗi 2 giây để đổi nguồn/mở lại hình nhanh."""
+
+def check_quality(quality) -> None:
+    if quality not in QUALITIES:
+        raise ValueError("quality must be one of " + ", ".join(QUALITIES))
+
+
+def build_hevc_cmd(source: str, width: int, height: int, fps: int,
+                   loop: bool = False, ffmpeg: str = "ffmpeg", rotate: int = 0, fit: str = "contain",
+                   quality: str = "standard") -> list[str]:
+    """ffmpeg command: any source -> rotated, fitted H.265 Annex-B on stdout (xem ``_QUALITY`` về các mức chất lượng)."""
     check_view(rotate, fit)
+    check_quality(quality)
+    q = _QUALITY[quality]
     cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin"]
     image = source.lower().split("?")[0].endswith(_IMAGE_EXT)
     if source.startswith("rtsp://"):
@@ -60,18 +76,19 @@ def build_hevc_cmd(source: str, width: int, height: int, fps: int,
     if source.startswith("lavfi:"):
         cmd += ["-f", "lavfi"]
         source = source[len("lavfi:"):]
-    gop = fps * 2
+    gop = fps * q["gop_seconds"]
     if fit == "cover":
         fit_vf = f"scale={width}:{height}:force_original_aspect_ratio=increase:flags=lanczos,crop={width}:{height}"
     else:
         fit_vf = (f"scale={width}:{height}:force_original_aspect_ratio=decrease:flags=lanczos,"
                   f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2")
+    params = (("crf=%d:" % q["crf"]) if q["crf"] else "") + (
+        f"keyint={gop}:min-keyint={gop}:scenecut=0:bframes=0:slices=1:repeat-headers=1:aud=0:log-level=none:"
+        f"vbv-maxrate={q['vbv']}:vbv-bufsize={q['vbv']}")
     cmd += ["-i", source, "-an",
-            "-vf", f"{_ROTATE_FILTER[rotate]}{fit_vf},fps={fps},format=yuv420p",
-            "-c:v", "libx265", "-preset", "slow", "-tune", "zerolatency", "-x265-params",
-            (f"crf=14:keyint={gop}:min-keyint={gop}:scenecut=0:bframes=0:slices=1:"
-             "repeat-headers=1:aud=0:log-level=none:"
-             "vbv-maxrate=3000:vbv-bufsize=3000"),
+            "-vf", f"{_ROTATE_FILTER[rotate]}{fit_vf},fps={fps}",
+            "-pix_fmt", "yuv420p", "-c:v", "libx265", "-preset", q["preset"],
+            "-tune", "zerolatency", "-x265-params", params,
             "-f", "hevc", "-"]
     return cmd
 
@@ -96,7 +113,8 @@ class Screen:
         # Layers = events, the newest on top wins; when a layer ends the one below (or the default) shows.
         self._layers: list[dict] = []
         self.default: dict = {"mode": "off", "source": ""}     # off | clock | image | video | live
-        self.view: dict = {"rotate": 0, "fit": "contain"}      # xoay + kiểu khung mặc định cho mọi lớp không tự nêu
+        self.view: dict = {"rotate": 0, "fit": "contain"}      # xoay + kiểu khung của màn hình mặc định
+        self.quality = "standard"                              # mức chất lượng mã hoá (áp cho mọi lớp)
         self._cur_key: tuple | None = None
         self._cur_layer: dict | None = None
         self._retry_at = 0.0
@@ -299,7 +317,7 @@ class Screen:
                 self.mode, self.source = "off", ""
                 return
             rotate, fit = self._view_of(layer)
-            key = (layer["owner"], layer["source"], layer["loop"], layer["mode"], rotate, fit)
+            key = (layer["owner"], layer["source"], layer["loop"], layer["mode"], rotate, fit, self.quality)
             if self._sender is not None and not self._sender.running:
                 self._cur_key = None                  # the AVTalk session died: reopen below
             if key == self._cur_key and (self._proc is not None or layer.get("ended")):
@@ -309,7 +327,7 @@ class Screen:
             assert self._sender is not None
             self._sender.reset()
             cmd = build_hevc_cmd(layer["source"], self.width, self.height, self.fps, layer["loop"], self.cfg.ffmpeg,
-                                 rotate, fit)
+                                 rotate, fit, self.quality)
             try:
                 proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             except OSError as exc:
@@ -398,6 +416,16 @@ class Screen:
             self.default = {"mode": mode, "source": source if mode in ("image", "video", "live") else ""}
             self._cur_key = None                      # force the encoder to restart on the new default
             self._apply()
+        return self.status()
+
+    def set_quality(self, quality: str) -> dict:
+        """Mức chất lượng mã hoá: standard | high | max; mã hoá lại thứ đang hiện."""
+        check_quality(quality)
+        with self._lock:
+            if quality != self.quality:
+                self.quality = quality
+                self._cur_key = None
+                self._apply()
         return self.status()
 
     def set_view(self, rotate: int | None = None, fit: str | None = None) -> dict:
@@ -515,7 +543,7 @@ class Screen:
                 "open": bool(s and s.running),
                 "source": redact_source(self.source) if self.mode not in ("text", "clock") else self.mode,
                 "default": dict(self.default, source=redact_source(self.default["source"])),
-                "view": dict(self.view), "weather": dict(self.weather) if self.weather else None,
+                "view": dict(self.view), "quality": self.quality, "weather": dict(self.weather) if self.weather else None,
                 "layers": [{"owner": l["owner"], "mode": l["mode"],
                             "source": redact_source(l["source"]) if l["mode"] not in ("text", "clock") else l["mode"],
                             "after": l["after"],

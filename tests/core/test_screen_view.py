@@ -98,9 +98,36 @@ def test_rotation_applies_only_to_the_default_screen_not_to_event_layers(cfg):
         scr.close()
 
 
-def test_encoder_settings_are_the_high_quality_ones():
+def _params(cmd):
+    return cmd[cmd.index("-x265-params") + 1]
+
+
+def test_standard_quality_is_exactly_the_encoder_that_worked_on_the_camera():
+    """Mặc định PHẢI là bộ mã hoá đã chạy tốt: ultrafast, không crf, vbv 400, khung khoá 4 s (đổi là camera đen)."""
     cmd = build_hevc_cmd(_RED_BLUE, W, H, FPS)
-    assert cmd[cmd.index("-preset") + 1] == "slow"
-    params = cmd[cmd.index("-x265-params") + 1]
-    assert "crf=14" in params and "keyint=20" in params and "vbv-maxrate=3000" in params
+    assert cmd[cmd.index("-preset") + 1] == "ultrafast"
+    assert _params(cmd) == ("keyint=40:min-keyint=40:scenecut=0:bframes=0:slices=1:repeat-headers=1:aud=0:log-level=none:"
+                            "vbv-maxrate=400:vbv-bufsize=400")
     assert "flags=lanczos" in cmd[cmd.index("-vf") + 1]
+
+
+def test_higher_qualities_raise_the_bitrate_and_only_max_changes_the_preset():
+    high, mx = build_hevc_cmd(_RED_BLUE, W, H, FPS, quality="high"), build_hevc_cmd(_RED_BLUE, W, H, FPS, quality="max")
+    assert high[high.index("-preset") + 1] == "ultrafast"             # cùng công cụ mã hoá → chip giải mã camera đọc được
+    assert "crf=18" in _params(high) and "vbv-maxrate=1500" in _params(high)
+    assert mx[mx.index("-preset") + 1] == "slow" and "crf=14" in _params(mx) and "vbv-maxrate=3000" in _params(mx)
+    with pytest.raises(ValueError):
+        build_hevc_cmd(_RED_BLUE, W, H, FPS, quality="ultra")
+
+
+def test_quality_setting_reencodes_and_is_validated(cfg):
+    scr = Screen(cfg)
+    try:
+        assert scr.status()["quality"] == "standard"
+        scr.set_quality("max")
+        assert scr.status()["quality"] == "max"
+        with pytest.raises(ValueError):
+            scr.set_quality("hay-nhat")
+        assert scr.status()["quality"] == "max"
+    finally:
+        scr.close()

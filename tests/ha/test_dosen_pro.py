@@ -46,6 +46,10 @@ async def _setup(hass, options=None, data=None):
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
+    try:                                       # đợi tác vụ nền khởi động (áp màn mặc định, thời tiết…) xong: các lệnh trong test không bị chen ngang
+        await asyncio.wait_for(hass.data[DOMAIN][entry.entry_id].startup_done.wait(), 5)
+    except (TimeoutError, KeyError):
+        pass
     return entry
 
 
@@ -504,9 +508,13 @@ async def test_default_screen_is_retried_until_its_camera_exists(hass, monkeypat
     async def screen_view(rotate, fit):
         return {}
 
+    async def screen_quality(quality):
+        return {}
+
     class Coord:
-        default_rotate, default_fit = 0, "contain"
-        api = SimpleNamespace(screen_view=screen_view)
+        default_rotate, default_fit, default_quality = 0, "contain", "standard"
+        startup_done = asyncio.Event()
+        api = SimpleNamespace(screen_view=screen_view, screen_quality=screen_quality)
 
         def __init__(self, fail_times):
             self.n, self.fail = 0, fail_times
@@ -569,6 +577,10 @@ async def test_weather_entity_feeds_the_clock_with_temperature_humidity_and_fore
     assert [c[1] for c in cam.screen.calls if c[0] == "weather"][-1]["condition"] == "rainy"
     await hass.services.async_call("select", "select_option", {"entity_id": "select.dosen_pro_thoi_tiet_tren_dong_ho",
                                                                "option": "—"}, blocking=True)
+    for _ in range(40):                                  # tác vụ nền lúc khởi động cũng đẩy thời tiết: chờ lần cuối là «không có»
+        if [c[1] for c in cam.screen.calls if c[0] == "weather"][-1] is None:
+            break
+        await asyncio.sleep(0.05)
     assert [c[1] for c in cam.screen.calls if c[0] == "weather"][-1] is None              # bỏ chọn → đồng hồ không còn thời tiết
 
 
@@ -579,3 +591,13 @@ async def test_weather_without_forecast_service_still_shows_current_conditions(h
                                                                "option": "weather.nha"}, blocking=True)
     w = [c[1] for c in _cam().screen.calls if c[0] == "weather"][-1]
     assert w["condition"] == "sunny" and w["temp"] == 30.0 and w["high"] is None and w["low"] is None
+
+
+async def test_quality_select_defaults_to_standard_and_pushes_changes_to_the_screen(hass):
+    await _setup(hass)
+    ent = "select.dosen_pro_chat_luong_hinh_tren_man"
+    assert hass.states.get(ent).state == "Chuẩn"
+    await hass.services.async_call("select", "select_option", {"entity_id": ent, "option": "Cao"}, blocking=True)
+    assert ("quality", "high") in _cam().screen.calls and hass.states.get(ent).state == "Cao"
+    await hass.services.async_call("select", "select_option", {"entity_id": ent, "option": "Cao nhất (thử, có thể đen)"}, blocking=True)
+    assert [c for c in _cam().screen.calls if c[0] == "quality"][-1] == ("quality", "max")
