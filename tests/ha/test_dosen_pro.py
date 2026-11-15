@@ -601,3 +601,14 @@ async def test_quality_select_defaults_to_standard_and_pushes_changes_to_the_scr
     assert ("quality", "high") in _cam().screen.calls and hass.states.get(ent).state == "Cao"
     await hass.services.async_call("select", "select_option", {"entity_id": ent, "option": "Cao nhất (thử, có thể đen)"}, blocking=True)
     assert [c for c in _cam().screen.calls if c[0] == "quality"][-1] == ("quality", "max")
+
+
+def test_brand_icons_exist_with_the_sizes_home_assistant_expects():
+    """HA (2026.3+) đọc icon của tích hợp tuỳ chỉnh từ custom_components/<domain>/brand/: bản sáng + tối, 256 px và @2x 512 px."""
+    import pathlib
+    from PIL import Image
+    brand = pathlib.Path(pkg.__file__).parent / "brand"
+    for name, size in (("icon.png", 256), ("icon@2x.png", 512), ("dark_icon.png", 256), ("dark_icon@2x.png", 512)):
+        img = Image.open(brand / name)
+        assert img.size == (size, size) and img.mode == "RGBA", name
+        assert img.getchannel("A").getextrema()[0] == 0, f"{name}: góc phải trong suốt"

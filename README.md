@@ -81,7 +81,7 @@ Camera chỉ nhận **một phiên hiển thị** một lúc (phiên thứ hai b
 
 Bố cục dọc 240×320, vẽ lại mỗi phút và mỗi khi thời tiết đổi:
 
-- thứ, ngày, **giờ lớn** (dấu hai chấm đỏ);
+- thứ, ngày, **giờ lớn** (dấu hai chấm đỏ); chữ đen trên nền sáng, điểm nhấn đỏ, cho dễ đọc trên màn nhỏ;
 - **ngày lễ sắp tới** và «Còn N ngày» (hoặc «Hôm nay», «Ngày mai»): ngày lễ dương lịch và âm lịch của Việt Nam, kể cả Giao thừa;
 - **năm Can Chi**, tháng, **âm lịch** (có đánh dấu tháng nhuận), **số tuần**;
 - **thời tiết**: biểu tượng (đổi theo ngày/đêm), nhiệt độ, tình trạng tiếng Việt, độ ẩm, thấp–cao trong ngày (lấy từ dự báo hằng ngày của
@@ -94,8 +94,11 @@ Trung thu và Giỗ Tổ 2026, tháng nhuận 2025.
 
 - **Xoay hình / kiểu khung** chỉ áp cho **màn hình mặc định** (ảnh, video, camera trực tiếp): xoay 90° để hình ngang vừa màn dọc,
   «lấp đầy» để cắt rìa thay vì chừa viền đen.
-- **Chất lượng hình**: *Chuẩn* (mặc định, bộ mã hoá đã chạy ổn trên camera), *Cao* (cùng công cụ, tốc độ bit cao hơn),
-  *Cao nhất (thử)*. Chip giải mã trong camera có giới hạn; **nếu màn đen hoặc chập chờn sau khi nâng mức thì quay về «Chuẩn»**.
+- **Chất lượng hình**: *Chuẩn* (mặc định, x265 ultrafast), *Cao* (cùng công cụ, chi tiết hơn khi chuyển động), *Cao nhất* (preset
+  chậm hơn, đẹp nhất). **Mọi mức đều giới hạn kích thước từng khung hình ở khoảng 7,5 KB**: camera chỉ nhận gói media cỡ vài KB (app iCSee
+  thật không gửi khung nào quá 5,8 KB; đo trên camera này cho thấy hiện được tới khoảng 8,4 KB, **đen từ khoảng 9,7 KB**). Vì vậy
+  các mức chỉ khác nhau ở độ nén (crf) và preset, **không** khác ở tốc độ bit. Ảnh đứng yên như đồng hồ: khung đầu hơi mờ rồi vài khung
+  sau tự làm nét. Nếu màn đen hoặc chập chờn thì đặt lại «Chuẩn».
 
 ## Assist và từ khoá đánh thức
 
@@ -167,7 +170,8 @@ công tắc «Tiếng bíp khi nhấn nút» chỉ điều khiển `KeyAudioTip`
 
 | Triệu chứng | Cách xử lý |
 |---|---|
-| Màn **đen / chập chờn** | Đặt «Chất lượng hình trên màn» về **Chuẩn**; kiểm `sensor.dosen_pro_noi_dung_man_hinh` có `last_error`. |
+| Màn **đen / chập chờn** | Nguyên nhân thường gặp là khung hình quá lớn (≥ ~9,7 KB). Đặt «Chất lượng hình trên màn» về **Chuẩn**; kiểm `sensor.dosen_pro_noi_dung_man_hinh` có `last_error`; đừng tự đổi bộ mã hoá. |
+| Không thấy **icon** | Icon nằm ở `custom_components/dosen_pro/brand/` (cần HA 2026.3 trở lên): **khởi động lại HA** rồi làm mới cứng trình duyệt (Ctrl+F5) vì giao diện giữ biểu tượng mặc định trong bộ nhớ đệm. HACS lấy biểu tượng từ kho riêng của nó nên danh sách HACS có thể vẫn hiện biểu tượng mặc định. |
 | Log «camera refused AVTalk claim: Ret=503» | Camera còn giữ phiên hiển thị cũ hoặc app khác đang mở màn; tự thử lại, thường hết sau vài giây. |
 | Đăng nhập báo **Ret 205 / tài khoản bị khoá** | Đợi camera mở khoá (hoặc khởi động lại camera), kiểm đúng tên tài khoản; dùng tài khoản riêng. |
 | Vừa cập nhật mà không thấy thực thể mới | **Khởi động lại HA** (không chỉ *Tải lại*). |
