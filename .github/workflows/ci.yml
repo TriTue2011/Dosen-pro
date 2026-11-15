@@ -33,6 +33,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - run: pip install pytest-homeassistant-custom-component
+      - run: pip install pytest-homeassistant-custom-component ha-ffmpeg     # ha-ffmpeg: tích hợp ffmpeg của HA import haffmpeg
       - name: Test tích hợp Home Assistant
         run: python -m pytest tests/ha -q
