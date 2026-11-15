@@ -13,6 +13,12 @@ screen_show:
       selector: {boolean: {}}
     live:
       selector: {boolean: {}}
+    split:
+      default: false
+      selector: {boolean: {}}
+    priority:
+      default: 2
+      selector: {number: {min: 1, max: 4, mode: slider}}
     after:
       default: "off"
       selector:
@@ -46,6 +52,9 @@ screen_text:
       selector: {text: {}}
     ttl:
       selector: {number: {min: 1, max: 86400, unit_of_measurement: "s", mode: box}}
+    priority:
+      default: 2
+      selector: {number: {min: 1, max: 4, mode: slider}}
     entry_id:
       selector: {text: {}}
 screen_card:
@@ -83,6 +92,9 @@ screen_card:
       selector: {text: {}}
     ttl:
       selector: {number: {min: 1, max: 86400, unit_of_measurement: "s", mode: box}}
+    priority:
+      default: 2
+      selector: {number: {min: 1, max: 4, mode: slider}}
     entry_id:
       selector: {text: {}}
 screen_carousel:

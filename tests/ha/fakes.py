@@ -18,22 +18,24 @@ class FakeScreen:
     def close(self):
         self.calls.append(("close",))
 
-    def show(self, source, loop, after, owner, ttl, live=None):
+    def show(self, source, loop, after, owner, ttl, live=None, priority=2, split=False):
         self.calls.append(("show", {"source": source, "loop": loop, "after": after, "owner": owner, "ttl": ttl,
-                                    **({"live": live} if live is not None else {})}))
+                                    **({"live": live} if live is not None else {}),
+                                    **({"priority": priority} if priority != 2 else {}), **({"split": True} if split else {})}))
         return self._status
 
-    def show_text(self, title, messages, font_size, after, owner, ttl):
+    def show_text(self, title, messages, font_size, after, owner, ttl, priority=2):
         self.calls.append(("text", {"title": title, "messages": messages, "font_size": font_size, "after": after,
-                                    "owner": owner, "ttl": ttl}))
+                                    "owner": owner, "ttl": ttl, **({"priority": priority} if priority != 2 else {})}))
         return self._status
 
     def show_clock(self, after, owner, ttl):
         self.calls.append(("clock", {"after": after, "owner": owner, "ttl": ttl}))
         return self._status
 
-    def show_card(self, title, value, caption, rows, color, after, owner, ttl, theme="light", layout="list", title_color=None):
-        self.calls.append(("card", {"title": title, "value": value, "caption": caption, "rows": rows, "color": color,
+    def show_card(self, title, value, caption, rows, color, after, owner, ttl, theme="light", layout="list", title_color=None,
+                  priority=2):
+        self.calls.append(("card", {**({"priority": priority} if priority != 2 else {}), "title": title, "value": value, "caption": caption, "rows": rows, "color": color,
                                     "after": after, "owner": owner, "ttl": ttl, "theme": theme, "layout": layout,
                                     "title_color": title_color}))
         return self._status

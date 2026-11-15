@@ -56,3 +56,14 @@ async def test_screen_show_service_passes_live_flag(hass):
     await _setup(hass)
     await hass.services.async_call(DOMAIN, "screen_show", {"source": "rtsp://cam/1", "live": True}, blocking=True)
     assert _calls("show")[-1]["live"] is True
+
+
+async def test_screen_services_pass_priority_and_split_to_the_screen(hass):
+    await _setup(hass)
+    await hass.services.async_call(DOMAIN, "screen_show", {"source": "rtsp://cam/1", "priority": 3, "split": True}, blocking=True)
+    s = _calls("show")[-1]
+    assert s["priority"] == 3 and s["split"] is True
+    await hass.services.async_call(DOMAIN, "screen_text", {"title": "x", "messages": ["y"], "priority": 4}, blocking=True)
+    assert _calls("text")[-1]["priority"] == 4
+    await hass.services.async_call(DOMAIN, "screen_show", {"source": "rtsp://cam/2"}, blocking=True)
+    assert "priority" not in _calls("show")[-1] and "split" not in _calls("show")[-1]       # mặc định: mức 2, không chia đôi

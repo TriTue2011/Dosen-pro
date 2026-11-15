@@ -51,22 +51,29 @@ class LocalApi:
 
     # -- màn hình -----------------------------------------------------------
     async def screen_show(self, source: str, loop: bool = False, after: str = "off",
-                          owner: str = "automation", ttl: float | None = None, live: bool | None = None) -> dict[str, Any]:
-        kw = {} if live is None else {"live": live}
+                          owner: str = "automation", ttl: float | None = None, live: bool | None = None,
+                          priority: int = 2, split: bool = False) -> dict[str, Any]:
+        kw: dict[str, Any] = {} if live is None else {"live": live}
+        if priority != 2:
+            kw["priority"] = priority
+        if split:
+            kw["split"] = True
         return await self._run(self.camera.screen.show, source, loop, after, owner, ttl, **kw)
 
     async def screen_text(self, title: str, messages: list, font_size: int = 15, after: str = "hold",
-                          owner: str = "automation", ttl: float | None = None) -> dict[str, Any]:
-        return await self._run(self.camera.screen.show_text, title, messages, font_size, after, owner, ttl)
+                          owner: str = "automation", ttl: float | None = None, priority: int = 2) -> dict[str, Any]:
+        kw = {"priority": priority} if priority != 2 else {}
+        return await self._run(self.camera.screen.show_text, title, messages, font_size, after, owner, ttl, **kw)
 
     async def screen_clock(self, after: str = "hold", owner: str = "automation", ttl: float | None = None) -> dict[str, Any]:
         return await self._run(self.camera.screen.show_clock, after, owner, ttl)
 
     async def screen_card(self, card: dict, after: str = "hold", owner: str = "automation",
-                          ttl: float | None = None) -> dict[str, Any]:
+                          ttl: float | None = None, priority: int = 2) -> dict[str, Any]:
+        kw = {"priority": priority} if priority != 2 else {}
         return await self._run(self.camera.screen.show_card, card["title"], card["value"], card["caption"], card["rows"],
                                card["color"], after, owner, ttl, card.get("theme", "light"), card.get("layout", "list"),
-                               card.get("title_color"))
+                               card.get("title_color"), **kw)
 
     async def screen_release(self, owner: str) -> dict[str, Any]:
         return await self._run(self.camera.screen.release, owner)

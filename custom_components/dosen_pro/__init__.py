@@ -32,7 +32,7 @@ from .display import DisplaySettings
 from .zalo import ZaloCallScreen
 from .websocket import async_register as ws_register
 from .dosen_core.render import CARD_LAYOUTS, CARD_THEMES
-from .dosen_core.screen import FITS, ROTATIONS
+from .dosen_core.screen import FITS, PRIORITIES, ROTATIONS
 from .resolve import resolve_camera, resolve_image, resolve_media, resolve_source
 
 _LOGGER = logging.getLogger(__name__)
@@ -62,6 +62,7 @@ SERVICE_SCHEMAS = {
         vol.Optional("main_entity"): cv.entity_id,
         vol.Optional("entities", default=[]): vol.All(cv.ensure_list, [_CARD_ENTITY]),
         vol.Optional("rows", default=[]): vol.All(cv.ensure_list, [vol.Any(_CARD_ROW, cv.string)]),
+        vol.Optional("priority", default=2): vol.All(vol.Coerce(int), vol.In(PRIORITIES)),
         vol.Optional("after", default="hold"): vol.In(["off", "hold"]),
         vol.Optional("owner", default="automation"): cv.string,
         vol.Optional("ttl"): vol.All(vol.Coerce(float), vol.Range(min=1, max=86400)),
@@ -73,6 +74,8 @@ SERVICE_SCHEMAS = {
         vol.Optional("media"): vol.Any(cv.string, dict),
         vol.Optional("loop", default=False): cv.boolean,
         vol.Optional("live"): cv.boolean,
+        vol.Optional("split", default=False): cv.boolean,
+        vol.Optional("priority", default=2): vol.All(vol.Coerce(int), vol.In(PRIORITIES)),
         vol.Optional("after", default="off"): vol.In(["off", "hold"]),
         vol.Optional("owner", default="automation"): cv.string,
         vol.Optional("ttl"): vol.All(vol.Coerce(float), vol.Range(min=1, max=86400)),
@@ -95,6 +98,7 @@ SERVICE_SCHEMAS = {
         vol.Optional("title", default=""): cv.string,
         vol.Optional("messages", default=[]): vol.All(cv.ensure_list, [vol.Any(cv.string, _MESSAGE)]),
         vol.Optional("font_size", default=15): vol.All(vol.Coerce(int), vol.Range(min=10, max=30)),
+        vol.Optional("priority", default=2): vol.All(vol.Coerce(int), vol.In(PRIORITIES)),
         vol.Optional("after", default="hold"): vol.In(["off", "hold"]),
         vol.Optional("owner", default="automation"): cv.string,
         vol.Optional("ttl"): vol.All(vol.Coerce(float), vol.Range(min=1, max=86400)),
@@ -291,10 +295,11 @@ async def _handle(hass: HomeAssistant, call: ServiceCall) -> None:
         if call.service == "screen_show":
             url = await resolve_source(coord.hass, source=d.get("source"), camera_entity=d.get("camera_entity"),
                                        media=d.get("media"), base=coord.ha_base)
-            await api.screen_show(url, d["loop"], d["after"], d["owner"], d.get("ttl"), d.get("live"))
+            await api.screen_show(url, d["loop"], d["after"], d["owner"], d.get("ttl"), d.get("live"),
+                                  d["priority"], d["split"])
         elif call.service == "screen_text":
             await api.screen_text(d["title"], d["messages"], d["font_size"], d["after"], d["owner"],
-                                  d.get("ttl"))
+                                  d.get("ttl"), d["priority"])
         elif call.service == "screen_carousel":
             car = coord.carousel
             try:
@@ -307,7 +312,7 @@ async def _handle(hass: HomeAssistant, call: ServiceCall) -> None:
                 await car.async_stop()
             coord.async_update_listeners()
         elif call.service == "screen_card":
-            await api.screen_card(build_card(coord.hass, d), d["after"], d["owner"], d.get("ttl"))
+            await api.screen_card(build_card(coord.hass, d), d["after"], d["owner"], d.get("ttl"), d["priority"])
         elif call.service == "screen_release":
             await api.screen_release(d["owner"])
         elif call.service == "screen_default":

@@ -71,6 +71,17 @@ blueprint:
       default: 30
       selector:
         number: {min: 0, max: 3600, unit_of_measurement: "s", mode: box}
+    uu_tien:
+      name: Mức ưu tiên (độ rủi ro)
+      description: "Cao hơn thì luôn ở trên cái thấp hơn; cùng mức thì sự kiện tới sau đè lên. Camera cùng mức thì chia đôi màn."
+      default: "2"
+      selector:
+        select:
+          options:
+            - {value: "1", label: "1 · Thấp"}
+            - {value: "2", label: "2 · Thường"}
+            - {value: "3", label: "3 · Cao"}
+            - {value: "4", label: "4 · Khẩn cấp"}
     ten_lop:
       name: Tên lớp
       description: "Cùng tên thì thay nhau; ví dụ «chuong_cua», «nguoi_la». Đừng dùng «zalo_call» và «zalo_call_video» (dành cho cuộc gọi Zalo)."
@@ -91,26 +102,27 @@ variables:
   noi_dung: !input noi_dung
   thoi_gian: !input thoi_gian
   ten_lop: !input ten_lop
+  uu_tien: !input uu_tien
 action:
   - choose:
       - conditions: "{{ kieu == 'chu' }}"
         sequence:
           - action: dosen_pro.screen_text
             data: >-
-              {% set d = {'title': tieu_de, 'messages': [{'role': 'info', 'text': noi_dung}], 'owner': ten_lop, 'after': 'hold'} %}
+              {% set d = {'title': tieu_de, 'messages': [{'role': 'info', 'text': noi_dung}], 'owner': ten_lop, 'after': 'hold', 'priority': uu_tien | int(2)} %}
               {% if thoi_gian | float(0) > 0 %}{% set d = dict(d, ttl=thoi_gian | float) %}{% endif %}
               {{ d }}
       - conditions: "{{ kieu == 'camera' }}"
         sequence:
           - action: dosen_pro.screen_show
             data: >-
-              {% set d = {'camera_entity': camera, 'owner': ten_lop, 'after': 'hold'} %}
+              {% set d = {'camera_entity': camera, 'owner': ten_lop, 'after': 'hold', 'priority': uu_tien | int(2), 'split': true} %}
               {% if thoi_gian | float(0) > 0 %}{% set d = dict(d, ttl=thoi_gian | float) %}{% endif %}
               {{ d }}
     default:
       - action: dosen_pro.screen_show
         data: >-
-          {% set d = {'loop': lap, 'owner': ten_lop,
+          {% set d = {'loop': lap, 'owner': ten_lop, 'priority': uu_tien | int(2),
                       'after': 'hold' if (kieu == 'anh' or thoi_gian | float(0) > 0) else 'off'} %}
           {% set d = dict(d, source=nguon) if nguon != '' else dict(d, media=media) %}
           {% if thoi_gian | float(0) > 0 %}{% set d = dict(d, ttl=thoi_gian | float) %}{% endif %}

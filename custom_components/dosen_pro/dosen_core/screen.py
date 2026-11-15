@@ -34,6 +34,10 @@ WATCHDOG_STUCK_S = 25.0
 WATCHDOG_EVERY_S = 3.0
 RETRY_FIRST_S, RETRY_MAX_S = 3.0, 30.0                 # lần thử lại sau lỗi: 3 s rồi gấp đôi tới 30 s (cắm lại nguồn là lên nhanh)
 CAROUSEL_OWNER = "carousel"              # lớp của màn luân phiên: luôn nằm dưới các lớp sự kiện khác
+PRIORITY_DEFAULT = 2                     # 1 thấp · 2 thường (cuộc gọi Zalo, sự kiện mặc định) · 3 cao · 4 khẩn. Lớp ưu tiên cao hơn LUÔN ở trên; cùng mức thì lớp tới sau đè lên.
+PRIORITIES = (1, 2, 3, 4)
+SPLIT_SLOTS = 2                          # màn chia đôi trên/dưới: tối đa hai camera cùng lúc
+SPLIT_ROTATE_S = 5.0                     # có hơn hai camera chờ: cứ 5 s đổi một lượt (kể cả khi thời gian giữ của mỗi camera dài hơn)
 ROTATIONS = (0, 90, 180, 270)            # độ xoay hình theo chiều kim đồng hồ
 FITS = ("contain", "cover")              # contain = vừa khung (có viền đen); cover = lấp đầy màn (cắt rìa)
 _ROTATE_FILTER = {0: "", 90: "transpose=1,", 180: "hflip,vflip,", 270: "transpose=2,"}
@@ -78,16 +82,10 @@ def is_live_source(source: str) -> bool:
     return low.startswith("rtsp://") or low.startswith("rtsps://") or low.endswith((".mjpg", ".mjpeg", "/video/view", "/mjpeg", "/stream.mjpg"))
 
 
-def build_hevc_cmd(source: str, width: int, height: int, fps: int,
-                   loop: bool = False, ffmpeg: str = "ffmpeg", rotate: int = 0, fit: str = "contain",
-                   quality: str = "standard", live: bool | None = None) -> list[str]:
-    """ffmpeg command: any source -> rotated, fitted H.265 Annex-B on stdout (xem ``_QUALITY`` về các mức chất lượng)."""
-    check_view(rotate, fit)
-    check_quality(quality)
-    q = _QUALITY[quality]
-    cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin"]
+def _input_args(source: str, fps: int, live: bool, loop: bool) -> list[str]:
+    """Tuỳ chọn đầu vào ffmpeg cho một nguồn, kết thúc bằng ``-i <nguồn>``."""
+    cmd: list[str] = []
     image = source.lower().split("?")[0].endswith(_IMAGE_EXT)
-    live = is_live_source(source) if live is None else live
     if source.startswith("rtsp://"):
         cmd += ["-rtsp_transport", "tcp", "-timeout", "5000000"]
     if live:
@@ -104,21 +102,55 @@ def build_hevc_cmd(source: str, width: int, height: int, fps: int,
     if source.startswith("lavfi:"):
         cmd += ["-f", "lavfi"]
         source = source[len("lavfi:"):]
+    return cmd + ["-i", source]
+
+
+def _encode_args(quality: str, fps: int, live: bool) -> list[str]:
+    q = _QUALITY[quality]
     gop = fps * (LIVE_GOP_SECONDS if live else q["gop_seconds"])
-    if fit == "cover":
-        fit_vf = f"scale={width}:{height}:force_original_aspect_ratio=increase:flags=lanczos,crop={width}:{height}"
-    else:
-        fit_vf = (f"scale={width}:{height}:force_original_aspect_ratio=decrease:flags=lanczos,"
-                  f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2")
     params = (("crf=%d:" % q["crf"]) if q["crf"] else "") + (
         f"keyint={gop}:min-keyint={gop}:scenecut=0:bframes=0:slices=1:repeat-headers=1:aud=0:log-level=none:"
         f"vbv-maxrate={q['vbv']}:vbv-bufsize={q['buf']}")
-    cmd += ["-i", source, "-an",
-            "-vf", f"{_ROTATE_FILTER[rotate]}{fit_vf},fps={fps}",
-            "-pix_fmt", "yuv420p", "-c:v", "libx265", "-preset", q["preset"],
-            "-tune", "zerolatency", "-x265-params", params,
-            "-f", "hevc", "-"]
-    return cmd
+    return ["-pix_fmt", "yuv420p", "-c:v", "libx265", "-preset", q["preset"],
+            "-tune", "zerolatency", "-x265-params", params, "-f", "hevc", "-"]
+
+
+def _fit_filter(width: int, height: int, fit: str) -> str:
+    if fit == "cover":
+        return f"scale={width}:{height}:force_original_aspect_ratio=increase:flags=lanczos,crop={width}:{height}"
+    return (f"scale={width}:{height}:force_original_aspect_ratio=decrease:flags=lanczos,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2")
+
+
+def build_hevc_cmd(source: str, width: int, height: int, fps: int,
+                   loop: bool = False, ffmpeg: str = "ffmpeg", rotate: int = 0, fit: str = "contain",
+                   quality: str = "standard", live: bool | None = None) -> list[str]:
+    """ffmpeg command: any source -> rotated, fitted H.265 Annex-B on stdout (xem ``_QUALITY`` về các mức chất lượng)."""
+    check_view(rotate, fit)
+    check_quality(quality)
+    live = is_live_source(source) if live is None else live
+    cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin"]
+    cmd += _input_args(source, fps, live, loop)
+    cmd += ["-an", "-vf", f"{_ROTATE_FILTER[rotate]}{_fit_filter(width, height, fit)},fps={fps}"]
+    return cmd + _encode_args(quality, fps, live)
+
+
+def build_split_cmd(sources: list[str], width: int, height: int, fps: int, ffmpeg: str = "ffmpeg",
+                    quality: str = "standard") -> list[str]:
+    """Chia màn theo chiều dọc: mỗi nguồn trực tiếp một ô cao ``height // n``, xếp trên → dưới, MỘT bộ mã hoá cho cả màn.
+    ``shortest=1``: một nguồn chết thì ffmpeg thoát (màn không đứng hình một nửa)."""
+    check_quality(quality)
+    n = len(sources)
+    if not 2 <= n <= SPLIT_SLOTS:
+        raise ValueError(f"chia màn cần 2..{SPLIT_SLOTS} nguồn")
+    cell = height // n
+    cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin"]
+    for src in sources:
+        cmd += _input_args(src, fps, True, False)
+    cells = ";".join(f"[{k}:v]{_fit_filter(width, cell, 'contain')},setsar=1,fps={fps}[c{k}]" for k in range(n))
+    stack = "".join(f"[c{k}]" for k in range(n)) + f"vstack=inputs={n}:shortest=1[v]"
+    cmd += ["-an", "-filter_complex", f"{cells};{stack}", "-map", "[v]"]
+    return cmd + _encode_args(quality, fps, True)
 
 
 class Screen:
@@ -140,6 +172,11 @@ class Screen:
         self._tmpdir = tempfile.mkdtemp(prefix="icsee-screen-")
         # Layers = events, the newest on top wins; when a layer ends the one below (or the default) shows.
         self._layers: list[dict] = []
+        self._seq = 0                                  # thứ tự tới của lớp: cùng mức ưu tiên thì lớp tới sau ở trên
+        self._group_ids: tuple = ()                    # nhóm camera đang chia màn (seq từng lớp)
+        self._group_size = 0
+        self._rot, self._rot_at = 0, 0.0               # vòng đổi camera khi có hơn SPLIT_SLOTS camera chờ
+        self._split_block: frozenset | None = None     # nhóm đã làm ffmpeg thoát: hiện riêng lớp trên cùng, không ghép lại nhóm đó
         self.default: dict = {"mode": "off", "source": ""}     # off | clock | image | video | live
         self.view: dict = {"rotate": 0, "fit": "contain"}      # xoay + kiểu khung của màn hình mặc định
         self.quality = "standard"                              # mức chất lượng mã hoá (áp cho mọi lớp)
@@ -347,6 +384,33 @@ class Screen:
             return 0, "contain"
         return self.view["rotate"], self.view["fit"]
 
+    def _target(self) -> dict | None:
+        """Cái đang phải hiện: lớp (ưu tiên, thứ tự tới) cao nhất; mặc định khi hết lớp. Các camera ``split`` liền nhau ở cùng mức trên cùng
+        được ghép chia đôi (tối đa SPLIT_SLOTS ô, hơn thế thì xoay vòng mỗi SPLIT_ROTATE_S giây)."""
+        stack = sorted(self._layers, key=lambda l: (l["priority"], l["seq"]))
+        if not stack:
+            self._group_ids, self._group_size = (), 0
+            return self._default_layer()
+        top = stack[-1]
+        group: list[dict] = []
+        if top.get("split"):
+            for l in reversed(stack):
+                if not (l.get("split") and l["priority"] == top["priority"]):
+                    break
+                group.append(l)
+            group.reverse()                                    # cũ nhất trước
+        ids = tuple(l["seq"] for l in group)
+        if ids != self._group_ids:
+            self._group_ids, self._rot, self._rot_at = ids, 0, time.monotonic() + SPLIT_ROTATE_S
+        if len(group) < 2 or self._split_block == frozenset(ids):
+            self._group_size = 0                                 # không ghép: không có gì để xoay
+            return top
+        self._group_size = len(group)
+        n = len(group)
+        members = [group[(self._rot + k) % n] for k in range(min(SPLIT_SLOTS, n))]
+        return {"owner": "split", "mode": "live", "source": " + ".join(m["source"] for m in members),
+                "members": members, "loop": False, "after": "hold", "live": True, "priority": top["priority"]}
+
     def _apply(self) -> None:
         """Make the encoder show the top layer (or the default); close the session if nothing is left."""
         with self._lock:
@@ -357,7 +421,7 @@ class Screen:
                 self._busy = None
 
     def _apply_locked(self) -> None:
-        layer = self._layers[-1] if self._layers else self._default_layer()
+        layer = self._target()
         if layer is None:
             self._stop_encoder()
             self._close_session()
@@ -376,8 +440,12 @@ class Screen:
         self._sender.reset()
         live = is_live_source(layer["source"]) if layer.get("live") is None else bool(layer["live"])
         self._sender.set_live(live)                               # nguồn trực tiếp: bộ gửi bỏ khung cũ khi chậm
-        cmd = build_hevc_cmd(layer["source"], self.width, self.height, self.fps, layer["loop"], self.cfg.ffmpeg,
-                             rotate, fit, self.quality, live)
+        if layer.get("members"):
+            cmd = build_split_cmd([m["source"] for m in layer["members"]], self.width, self.height, self.fps, self.cfg.ffmpeg,
+                                  self.quality)
+        else:
+            cmd = build_hevc_cmd(layer["source"], self.width, self.height, self.fps, layer["loop"], self.cfg.ffmpeg,
+                                 rotate, fit, self.quality, live)
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         except OSError as exc:
@@ -390,16 +458,23 @@ class Screen:
         threading.Thread(target=self._pump, args=(proc, self._token), daemon=True,
                          name="screen-pump").start()
         log.info("man hinh: hien %s (%s) lop=%s con %d lop", layer["mode"],
-                 redact_source(layer["source"]), layer["owner"], len(self._layers))
+                 redact_source(layer["source"]), layer["owner"] if not layer.get("members") else
+                 "chia doi " + "+".join(m["owner"] for m in layer["members"]), len(self._layers))
 
     def show(self, source: str, loop: bool = False, after: str = "off", owner: str = "api",
-             ttl: float | None = None, mode: str | None = None, live: bool | None = None) -> dict:
+             ttl: float | None = None, mode: str | None = None, live: bool | None = None,
+             priority: int = PRIORITY_DEFAULT, split: bool = False) -> dict:
         """Push an event layer showing ``source`` (file, URL, rtsp://, image, lavfi:...).
 
         The newest layer is displayed. A layer ends when its source ends (``after="off"``), when
         ``ttl`` seconds pass, or on ``release(owner)``; then the layer below, or the default screen,
         shows again. ``after="hold"`` keeps the last frame until ttl/release. Showing again with the
-        same ``owner`` replaces that owner's layer."""
+        same ``owner`` replaces that owner's layer.
+
+        ``priority`` 1..4: lớp mức cao hơn luôn ở trên (mức thấp hơn chờ bên dưới, hết giờ ``ttl`` vẫn tính); cùng mức thì lớp tới sau đè
+        lên rồi trả lại lớp dưới khi hết. ``split``: camera trực tiếp được chia màn với các camera ``split`` khác cùng mức trên cùng."""
+        if priority not in PRIORITIES:
+            raise ValueError("priority must be 1..4")
         if after not in ("off", "hold"):
             raise ValueError("after must be 'off' or 'hold'")
         if ttl is not None and not 0 < ttl <= 86400:
@@ -408,13 +483,12 @@ class Screen:
             raise ValueError("owner must be a short non-empty string")
         with self._lock:
             self._layers = [l for l in self._layers if l["owner"] != owner]
+            self._seq += 1
             layer = {"owner": owner, "source": source, "loop": bool(loop), "after": after, "live": live,
-                     "mode": mode or self._kind(source),
+                     "mode": mode or self._kind(source), "seq": self._seq, "split": bool(split),
+                     "priority": 0 if owner == CAROUSEL_OWNER else priority,     # luân phiên nằm DƯỚI mọi sự kiện (mức 0)
                      "deadline": time.monotonic() + ttl if ttl else None}
-            if owner == CAROUSEL_OWNER:
-                self._layers.insert(0, layer)              # luân phiên nằm DƯỚI mọi sự kiện: cuộc gọi, chuông cửa, Assist vẫn đè lên
-            else:
-                self._layers.append(layer)
+            self._layers.append(layer)
             try:
                 self._apply()
             except Exception:
@@ -423,12 +497,12 @@ class Screen:
         return self.status()
 
     def show_text(self, title: str = "", messages: list | None = None, font_size: int = 15,
-                  after: str = "hold", owner: str = "api", ttl: float | None = None) -> dict:
+                  after: str = "hold", owner: str = "api", ttl: float | None = None, priority: int = PRIORITY_DEFAULT) -> dict:
         png = render.render_screen(title, messages, font_size)
         path = os.path.join(self._tmpdir, "text-%s-%d.png" % (re.sub(r"\W", "_", owner), self.switches + 1))
         with open(path, "wb") as f:
             f.write(png)
-        status = self.show(path, after=after, owner=owner, ttl=ttl, mode="text")
+        status = self.show(path, after=after, owner=owner, ttl=ttl, mode="text", priority=priority)
         for old in os.listdir(self._tmpdir):               # keep the newest text image and the clock only
             if old.startswith("text-") and old != os.path.basename(path) \
                     and not any(l["source"].endswith(old) for l in self._layers):
@@ -456,7 +530,8 @@ class Screen:
 
     def show_card(self, title: str = "", value: str = "", caption: str = "", rows: list | None = None,
                   color: str = "red", after: str = "hold", owner: str = "api", ttl: float | None = None,
-                  theme: str = "light", layout: str = "list", title_color: str | None = None) -> dict:
+                  theme: str = "light", layout: str = "list", title_color: str | None = None,
+                  priority: int = PRIORITY_DEFAULT) -> dict:
         """Thẻ thông tin (số lớn + các dòng nhãn–giá trị): vẽ rồi hiện như một lớp sự kiện (xem ``render.render_card``)."""
         if theme not in render.CARD_THEMES or layout not in render.CARD_LAYOUTS:
             raise ValueError("theme must be light|dark and layout list|tiles")
@@ -467,7 +542,7 @@ class Screen:
         path = os.path.join(self._tmpdir, "text-%s-%d.png" % (re.sub(r"\W", "_", owner), self.switches + 1))
         with open(path, "wb") as f:
             f.write(png)
-        status = self.show(path, after=after, owner=owner, ttl=ttl, mode="text")
+        status = self.show(path, after=after, owner=owner, ttl=ttl, mode="text", priority=priority)
         for old in os.listdir(self._tmpdir):               # giữ ảnh chữ/thẻ mới nhất và đồng hồ, như show_text
             if old.startswith("text-") and old != os.path.basename(path) \
                     and not any(l["source"].endswith(old) for l in self._layers):
@@ -574,7 +649,14 @@ class Screen:
             if layer is None:
                 return
             is_default = layer["owner"] == "default"
-            if is_default and layer["mode"] == "live":
+            if layer.get("members"):
+                # Màn chia đôi: một nguồn chết thì ffmpeg thoát, không biết nguồn nào. Đánh dấu nhóm này «không ghép» → hiện riêng lớp trên cùng
+                # (nếu chính nó hỏng thì đường lớp đơn thường gỡ nó), tránh vòng dựng lại mãi cùng một tổ hợp.
+                self._split_block = frozenset(self._group_ids)
+                log.warning("man hinh: man chia doi dung (%s); hien rieng lop tren cung", self.last_error or "nguon ket thuc")
+                self._cur_key = None
+                self._apply_quiet()
+            elif is_default and layer["mode"] == "live":
                 self._retry_at = time.monotonic() + 5       # camera stream dropped: try again soon
                 self._cur_key = None
             elif layer["after"] == "off" or (self.last_error and not is_default):
@@ -610,6 +692,10 @@ class Screen:
                         self._apply()
                         continue
                     if now < backoff_until:
+                        continue
+                    if self._group_size > SPLIT_SLOTS and now >= self._rot_at:
+                        self._rot, self._rot_at, self._cur_key = self._rot + 1, now + SPLIT_ROTATE_S, None
+                        self._apply()
                         continue
                     want = bool(self._layers) or self.default["mode"] != "off"
                     alive = self._sender is not None and self._sender.running
@@ -667,9 +753,9 @@ class Screen:
                 "view": dict(self.view), "quality": self.quality, "aborts": self.aborts, "weather": dict(self.weather) if self.weather else None,
                 "layers": [{"owner": l["owner"], "mode": l["mode"],
                             "source": redact_source(l["source"]) if l["mode"] not in ("text", "clock") else l["mode"],
-                            "after": l["after"],
+                            "after": l["after"], "priority": l["priority"], "split": l.get("split", False),
                             "ttl_left": round(l["deadline"] - now, 1) if l.get("deadline") else None}
-                           for l in self._layers],
+                           for l in sorted(self._layers, key=lambda l: (l["priority"], l["seq"]))],     # đáy trước, lớp đang hiện cuối
                 "size": [self.width, self.height],
                 "fps": self.fps, "switches": self.switches,
                 "started_at": self.started_at, "last_error": self.last_error,

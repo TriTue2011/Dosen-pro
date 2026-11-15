@@ -1,0 +1,442 @@
+blueprint:
+  name: "Dosen Pro: nhiều sự kiện lên màn camera (ưu tiên, chia đôi, xoay camera)"
+  description: >-
+    **Một automation, tới 4 «ô» sự kiện.** Mỗi ô có điều kiện kích hoạt riêng và chiếu MỘT loại riêng lên màn camera
+    (camera trực tiếp, hình, video hay dòng chữ), kèm **mức ưu tiên** và thời gian giữ riêng. Ô nào không chọn cảm biến thì tắt.
+
+
+    **Luật chiếu** (do tích hợp xử lý, áp cho mọi sự kiện kể cả cuộc gọi Zalo):
+
+    - Mức ưu tiên cao hơn **luôn ở trên**; hai sự kiện kích cùng lúc thì mức cao hiện trước, mức thấp chờ bên dưới (thời gian giữ vẫn chạy).
+
+    - Cùng mức thì **sự kiện tới sau đè lên** (kể cả đang xem hình cuộc gọi Zalo), hết thì khôi phục cái bên dưới.
+
+    - **Camera** cùng mức trên cùng thì **chia đôi màn** (trên / dưới, tối đa 2 camera một lúc). Có hơn 2 camera thì cứ **5 giây đổi một lượt**,
+      dù thời gian giữ của mỗi camera dài hơn; camera nào hết thời gian giữ thì rơi khỏi vòng.
+
+    - Hết sự kiện cuối thì về màn hình mặc định (đồng hồ, luân phiên…).
+
+
+    Điều kiện kích hoạt của mỗi ô là «**thực thể đổi sang trạng thái**» (cảm biến người, cửa mở, chuông…). Muốn điều kiện phức tạp hơn
+    (khung giờ, nhiều điều kiện) thì dùng blueprint «chiếu lên màn camera khi có sự kiện» hoặc tự viết automation gọi `dosen_pro.screen_show`.
+  domain: automation
+  author: TriTue2011
+  homeassistant:
+    min_version: 2024.11.0
+  input:
+    o1:
+      name: "Ô 1"
+      icon: mdi:numeric-1-box-outline
+      collapsed: false
+      input:
+        e1:
+          name: "Khi thực thể nào đổi trạng thái"
+          description: "Để trống = tắt ô này. Chọn nhiều thực thể thì cái nào đổi cũng kích hoạt."
+          default: []
+          selector:
+            entity: {multiple: true}
+        t1:
+          name: "Sang trạng thái"
+          default: "on"
+          selector:
+            text: {}
+        k1:
+          name: "Chiếu gì"
+          default: camera
+          selector:
+            select:
+              options:
+                - {value: camera, label: "Camera trực tiếp"}
+                - {value: anh, label: "Hình ảnh"}
+                - {value: video, label: "Video"}
+                - {value: chu, label: "Dòng chữ"}
+        c1:
+          name: "Camera (khi chọn «Camera trực tiếp»)"
+          description: "Chọn một hay nhiều camera; nhiều camera thì chia đôi màn / xoay vòng 5 giây."
+          default: []
+          selector:
+            entity: {domain: camera, multiple: true}
+        m1:
+          name: "Hình / video lấy từ kho media (khi chọn «Hình ảnh» hoặc «Video»)"
+          default: {}
+          selector:
+            media: {}
+        n1:
+          name: "Hoặc địa chỉ gõ tay"
+          description: "Nếu điền thì dùng thay cho ô chọn media: URL http(s):// hoặc rtsp://."
+          default: ""
+          selector:
+            text: {}
+        lp1:
+          name: "Lặp video"
+          default: false
+          selector:
+            boolean: {}
+        td1:
+          name: "Tiêu đề (khi chọn «Dòng chữ»)"
+          default: "Thông báo"
+          selector:
+            text: {}
+        nd1:
+          name: "Nội dung (khi chọn «Dòng chữ»)"
+          default: ""
+          selector:
+            text: {multiline: true}
+        u1:
+          name: "Mức ưu tiên (độ rủi ro)"
+          description: "Cao hơn thì luôn ở trên. Ví dụ: có người lạ = Cao, khói/cháy = Khẩn cấp, chuông cửa = Thường."
+          default: "2"
+          selector:
+            select:
+              options:
+                - {value: "1", label: "1 · Thấp"}
+                - {value: "2", label: "2 · Thường"}
+                - {value: "3", label: "3 · Cao"}
+                - {value: "4", label: "4 · Khẩn cấp"}
+        tg1:
+          name: "Giữ trên màn bao lâu (giây)"
+          description: "0 = camera/hình giữ tới khi có sự kiện cao hơn hoặc hết; video không lặp thì tới khi hết video."
+          default: 10
+          selector:
+            number: {min: 0, max: 3600, unit_of_measurement: "s", mode: box}
+        l1:
+          name: "Tên lớp"
+          description: "Cùng tên thì thay nhau. Đừng dùng «zalo_call» và «zalo_call_video»."
+          default: "su_kien_1"
+          selector:
+            text: {}
+    o2:
+      name: "Ô 2"
+      icon: mdi:numeric-2-box-outline
+      collapsed: true
+      input:
+        e2:
+          name: "Khi thực thể nào đổi trạng thái"
+          description: "Để trống = tắt ô này. Chọn nhiều thực thể thì cái nào đổi cũng kích hoạt."
+          default: []
+          selector:
+            entity: {multiple: true}
+        t2:
+          name: "Sang trạng thái"
+          default: "on"
+          selector:
+            text: {}
+        k2:
+          name: "Chiếu gì"
+          default: camera
+          selector:
+            select:
+              options:
+                - {value: camera, label: "Camera trực tiếp"}
+                - {value: anh, label: "Hình ảnh"}
+                - {value: video, label: "Video"}
+                - {value: chu, label: "Dòng chữ"}
+        c2:
+          name: "Camera (khi chọn «Camera trực tiếp»)"
+          description: "Chọn một hay nhiều camera; nhiều camera thì chia đôi màn / xoay vòng 5 giây."
+          default: []
+          selector:
+            entity: {domain: camera, multiple: true}
+        m2:
+          name: "Hình / video lấy từ kho media (khi chọn «Hình ảnh» hoặc «Video»)"
+          default: {}
+          selector:
+            media: {}
+        n2:
+          name: "Hoặc địa chỉ gõ tay"
+          description: "Nếu điền thì dùng thay cho ô chọn media: URL http(s):// hoặc rtsp://."
+          default: ""
+          selector:
+            text: {}
+        lp2:
+          name: "Lặp video"
+          default: false
+          selector:
+            boolean: {}
+        td2:
+          name: "Tiêu đề (khi chọn «Dòng chữ»)"
+          default: "Thông báo"
+          selector:
+            text: {}
+        nd2:
+          name: "Nội dung (khi chọn «Dòng chữ»)"
+          default: ""
+          selector:
+            text: {multiline: true}
+        u2:
+          name: "Mức ưu tiên (độ rủi ro)"
+          description: "Cao hơn thì luôn ở trên. Ví dụ: có người lạ = Cao, khói/cháy = Khẩn cấp, chuông cửa = Thường."
+          default: "2"
+          selector:
+            select:
+              options:
+                - {value: "1", label: "1 · Thấp"}
+                - {value: "2", label: "2 · Thường"}
+                - {value: "3", label: "3 · Cao"}
+                - {value: "4", label: "4 · Khẩn cấp"}
+        tg2:
+          name: "Giữ trên màn bao lâu (giây)"
+          description: "0 = camera/hình giữ tới khi có sự kiện cao hơn hoặc hết; video không lặp thì tới khi hết video."
+          default: 10
+          selector:
+            number: {min: 0, max: 3600, unit_of_measurement: "s", mode: box}
+        l2:
+          name: "Tên lớp"
+          description: "Cùng tên thì thay nhau. Đừng dùng «zalo_call» và «zalo_call_video»."
+          default: "su_kien_2"
+          selector:
+            text: {}
+    o3:
+      name: "Ô 3"
+      icon: mdi:numeric-3-box-outline
+      collapsed: true
+      input:
+        e3:
+          name: "Khi thực thể nào đổi trạng thái"
+          description: "Để trống = tắt ô này. Chọn nhiều thực thể thì cái nào đổi cũng kích hoạt."
+          default: []
+          selector:
+            entity: {multiple: true}
+        t3:
+          name: "Sang trạng thái"
+          default: "on"
+          selector:
+            text: {}
+        k3:
+          name: "Chiếu gì"
+          default: camera
+          selector:
+            select:
+              options:
+                - {value: camera, label: "Camera trực tiếp"}
+                - {value: anh, label: "Hình ảnh"}
+                - {value: video, label: "Video"}
+                - {value: chu, label: "Dòng chữ"}
+        c3:
+          name: "Camera (khi chọn «Camera trực tiếp»)"
+          description: "Chọn một hay nhiều camera; nhiều camera thì chia đôi màn / xoay vòng 5 giây."
+          default: []
+          selector:
+            entity: {domain: camera, multiple: true}
+        m3:
+          name: "Hình / video lấy từ kho media (khi chọn «Hình ảnh» hoặc «Video»)"
+          default: {}
+          selector:
+            media: {}
+        n3:
+          name: "Hoặc địa chỉ gõ tay"
+          description: "Nếu điền thì dùng thay cho ô chọn media: URL http(s):// hoặc rtsp://."
+          default: ""
+          selector:
+            text: {}
+        lp3:
+          name: "Lặp video"
+          default: false
+          selector:
+            boolean: {}
+        td3:
+          name: "Tiêu đề (khi chọn «Dòng chữ»)"
+          default: "Thông báo"
+          selector:
+            text: {}
+        nd3:
+          name: "Nội dung (khi chọn «Dòng chữ»)"
+          default: ""
+          selector:
+            text: {multiline: true}
+        u3:
+          name: "Mức ưu tiên (độ rủi ro)"
+          description: "Cao hơn thì luôn ở trên. Ví dụ: có người lạ = Cao, khói/cháy = Khẩn cấp, chuông cửa = Thường."
+          default: "2"
+          selector:
+            select:
+              options:
+                - {value: "1", label: "1 · Thấp"}
+                - {value: "2", label: "2 · Thường"}
+                - {value: "3", label: "3 · Cao"}
+                - {value: "4", label: "4 · Khẩn cấp"}
+        tg3:
+          name: "Giữ trên màn bao lâu (giây)"
+          description: "0 = camera/hình giữ tới khi có sự kiện cao hơn hoặc hết; video không lặp thì tới khi hết video."
+          default: 10
+          selector:
+            number: {min: 0, max: 3600, unit_of_measurement: "s", mode: box}
+        l3:
+          name: "Tên lớp"
+          description: "Cùng tên thì thay nhau. Đừng dùng «zalo_call» và «zalo_call_video»."
+          default: "su_kien_3"
+          selector:
+            text: {}
+    o4:
+      name: "Ô 4"
+      icon: mdi:numeric-4-box-outline
+      collapsed: true
+      input:
+        e4:
+          name: "Khi thực thể nào đổi trạng thái"
+          description: "Để trống = tắt ô này. Chọn nhiều thực thể thì cái nào đổi cũng kích hoạt."
+          default: []
+          selector:
+            entity: {multiple: true}
+        t4:
+          name: "Sang trạng thái"
+          default: "on"
+          selector:
+            text: {}
+        k4:
+          name: "Chiếu gì"
+          default: camera
+          selector:
+            select:
+              options:
+                - {value: camera, label: "Camera trực tiếp"}
+                - {value: anh, label: "Hình ảnh"}
+                - {value: video, label: "Video"}
+                - {value: chu, label: "Dòng chữ"}
+        c4:
+          name: "Camera (khi chọn «Camera trực tiếp»)"
+          description: "Chọn một hay nhiều camera; nhiều camera thì chia đôi màn / xoay vòng 5 giây."
+          default: []
+          selector:
+            entity: {domain: camera, multiple: true}
+        m4:
+          name: "Hình / video lấy từ kho media (khi chọn «Hình ảnh» hoặc «Video»)"
+          default: {}
+          selector:
+            media: {}
+        n4:
+          name: "Hoặc địa chỉ gõ tay"
+          description: "Nếu điền thì dùng thay cho ô chọn media: URL http(s):// hoặc rtsp://."
+          default: ""
+          selector:
+            text: {}
+        lp4:
+          name: "Lặp video"
+          default: false
+          selector:
+            boolean: {}
+        td4:
+          name: "Tiêu đề (khi chọn «Dòng chữ»)"
+          default: "Thông báo"
+          selector:
+            text: {}
+        nd4:
+          name: "Nội dung (khi chọn «Dòng chữ»)"
+          default: ""
+          selector:
+            text: {multiline: true}
+        u4:
+          name: "Mức ưu tiên (độ rủi ro)"
+          description: "Cao hơn thì luôn ở trên. Ví dụ: có người lạ = Cao, khói/cháy = Khẩn cấp, chuông cửa = Thường."
+          default: "2"
+          selector:
+            select:
+              options:
+                - {value: "1", label: "1 · Thấp"}
+                - {value: "2", label: "2 · Thường"}
+                - {value: "3", label: "3 · Cao"}
+                - {value: "4", label: "4 · Khẩn cấp"}
+        tg4:
+          name: "Giữ trên màn bao lâu (giây)"
+          description: "0 = camera/hình giữ tới khi có sự kiện cao hơn hoặc hết; video không lặp thì tới khi hết video."
+          default: 10
+          selector:
+            number: {min: 0, max: 3600, unit_of_measurement: "s", mode: box}
+        l4:
+          name: "Tên lớp"
+          description: "Cùng tên thì thay nhau. Đừng dùng «zalo_call» và «zalo_call_video»."
+          default: "su_kien_4"
+          selector:
+            text: {}
+mode: parallel
+max_exceeded: silent
+trigger:
+  - trigger: state
+    entity_id: !input e1
+    to: !input t1
+    id: "0"
+  - trigger: state
+    entity_id: !input e2
+    to: !input t2
+    id: "1"
+  - trigger: state
+    entity_id: !input e3
+    to: !input t3
+    id: "2"
+  - trigger: state
+    entity_id: !input e4
+    to: !input t4
+    id: "3"
+variables:
+  slots:
+    - k: !input k1
+      c: !input c1
+      m: !input m1
+      n: !input n1
+      lp: !input lp1
+      td: !input td1
+      nd: !input nd1
+      u: !input u1
+      tg: !input tg1
+      l: !input l1
+    - k: !input k2
+      c: !input c2
+      m: !input m2
+      n: !input n2
+      lp: !input lp2
+      td: !input td2
+      nd: !input nd2
+      u: !input u2
+      tg: !input tg2
+      l: !input l2
+    - k: !input k3
+      c: !input c3
+      m: !input m3
+      n: !input n3
+      lp: !input lp3
+      td: !input td3
+      nd: !input nd3
+      u: !input u3
+      tg: !input tg3
+      l: !input l3
+    - k: !input k4
+      c: !input c4
+      m: !input m4
+      n: !input n4
+      lp: !input lp4
+      td: !input td4
+      nd: !input nd4
+      u: !input u4
+      tg: !input tg4
+      l: !input l4
+action:
+  - variables:
+      s: "{{ slots[trigger.id | int] }}"
+  - choose:
+      - conditions: "{{ s.k == 'chu' }}"
+        sequence:
+          - action: dosen_pro.screen_text
+            data: >-
+              {% set d = {'title': s.td, 'messages': [{'role': 'info', 'text': s.nd}], 'owner': s.l, 'after': 'hold',
+                          'priority': s.u | int(2)} %}
+              {% if s.tg | float(0) > 0 %}{% set d = dict(d, ttl=s.tg | float) %}{% endif %}
+              {{ d }}
+      - conditions: "{{ s.k == 'camera' }}"
+        sequence:
+          - repeat:
+              for_each: "{{ s.c if s.c is list else [s.c] }}"
+              sequence:
+                - action: dosen_pro.screen_show
+                  data: >-
+                    {% set d = {'camera_entity': repeat.item, 'owner': s.l ~ '_' ~ repeat.index, 'after': 'hold',
+                                'priority': s.u | int(2), 'split': true} %}
+                    {% if s.tg | float(0) > 0 %}{% set d = dict(d, ttl=s.tg | float) %}{% endif %}
+                    {{ d }}
+    default:
+      - action: dosen_pro.screen_show
+        data: >-
+          {% set d = {'loop': s.lp, 'owner': s.l, 'priority': s.u | int(2),
+                      'after': 'hold' if (s.k == 'anh' or s.tg | float(0) > 0) else 'off'} %}
+          {% set d = dict(d, source=s.n) if s.n != '' else dict(d, media=s.m) %}
+          {% if s.tg | float(0) > 0 %}{% set d = dict(d, ttl=s.tg | float) %}{% endif %}
+          {{ d }}

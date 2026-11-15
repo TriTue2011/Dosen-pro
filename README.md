@@ -83,7 +83,20 @@ Màn hình hoạt động theo **lớp**:
 - **Sự kiện** (`dosen_pro.screen_show`, `screen_text` với `owner` và `ttl`): lớp **gần nhất đè lên**; hết video / hết `ttl` /
   `screen_release` thì về lớp bên dưới, hết lớp thì về màn hình mặc định. Cùng `owner` thì thay nhau, khác thì xếp chồng.
   Lớp sự kiện luôn hiện nguyên trạng (không xoay).
-- **Cuộc gọi Zalo** tự chiếu (lớp `zalo_call` chữ + `zalo_call_video` hình). Chiếu video, camera… làm bằng dịch vụ hoặc **blueprint**.
+- **Cuộc gọi Zalo** tự chiếu (lớp `zalo_call` chữ + `zalo_call_video` hình). Chiếu video, camera… làm bằng dịch vụ hoặc **blueprint**; nhiều sự kiện cùng lúc xếp theo mức ưu tiên (mục dưới).
+
+### Nhiều sự kiện cùng lúc: ưu tiên, chia đôi, xoay camera
+
+Mỗi lớp có **mức ưu tiên** `priority` 1 thấp · **2 thường** (mặc định; cuộc gọi Zalo cũng mức này) · 3 cao · 4 khẩn cấp:
+
+- Mức cao hơn **luôn ở trên**. Sự kiện mức thấp tới sau thì chờ bên dưới (thời gian giữ `ttl` của nó vẫn chạy, hết giờ thì mất).
+- **Cùng mức thì lớp tới sau đè lên**, hết thì trả lại lớp trước. Ví dụ đang xem hình cuộc gọi Zalo, camera cửa kích hoạt: camera hiện luôn,
+  hết giờ thì khôi phục cuộc gọi.
+- Lớp luân phiên (carousel) luôn ở đáy (mức 0).
+- **Camera `split: true`** cùng mức trên cùng thì **chia đôi màn** (trên / dưới, mỗi ô 240×160, tối đa 2 camera). Có hơn 2 camera thì
+  **cứ 5 giây đổi một lượt** (kể cả khi `ttl` mỗi camera là 10 giây); camera hết `ttl` thì rơi khỏi vòng. Camera đơn lẻ vẫn chiếm cả màn.
+- Một camera trong màn chia đôi chết: màn hiện riêng lớp trên cùng (lớp hỏng tự gỡ) rồi ghép lại phần còn lại, không dựng lại liên tục.
+- Phần chia đôi **chỉ gộp các camera `split`**; hình cuộc gọi Zalo không bị gộp.
 
 Màn hình camera **chỉ hiện hình khi đang sáng**: mỗi lần mở phiên hiển thị, tích hợp tự bật nguồn màn (lệnh `OPScreenSwitchControl`).
 Camera chỉ nhận **một phiên hiển thị** một lúc (phiên thứ hai bị từ chối, Ret 503).
@@ -221,7 +234,7 @@ Thời lượng mặc định mỗi màn là **20 giây**, chỉnh ở thẻ «M
 ## Dịch vụ
 
 `dosen_pro.screen_show` (nguồn: `camera_entity`, `media`, hoặc gõ `source`), `screen_text`, `screen_card`, `screen_carousel`, `screen_release`, `screen_default`,
-`screen_off`, `screen_power`, `screen_sleep`. Loa dùng `media_player.dosen_pro_loa` (`tts.speak`, `media_player.play_media`). Xem mô tả từng trường trong *Công cụ nhà phát triển → Dịch vụ*.
+`screen_off`, `screen_power`, `screen_sleep`. `screen_show`, `screen_text`, `screen_card` nhận thêm `priority` (1–4); `screen_show` nhận `split` (chia đôi màn cho camera) và `live`. Loa dùng `media_player.dosen_pro_loa` (`tts.speak`, `media_player.play_media`). Xem mô tả từng trường trong *Công cụ nhà phát triển → Dịch vụ*.
 
 ```yaml
 # Chuông cửa: hình camera cửa lên màn gần thời gian thật (live: true), kèm tiếng chuông
@@ -252,6 +265,7 @@ Chép các tệp trong `blueprints/automation/dosen_pro/` vào `/config/blueprin
 | Blueprint | Làm gì |
 |---|---|
 | `man_hinh_su_kien.yaml` | Có sự kiện (chuông cửa, phát hiện người…) thì chiếu video / camera trực tiếp / ảnh / chữ lên màn, giữ N giây. |
+| `man_hinh_nhieu_su_kien.yaml` | **Một automation, 4 ô sự kiện**: mỗi ô có cảm biến kích hoạt riêng, một loại riêng (camera — chọn nhiều camera / hình / video / chữ), mức ưu tiên và thời gian giữ riêng. Camera chia đôi màn, xoay 5 giây (xem *Nhiều sự kiện cùng lúc*). Điều kiện mỗi ô là «thực thể đổi sang trạng thái» (HA không cho gộp nhiều bộ kích hoạt tuỳ ý trong một blueprint). |
 | `nut_goi_camera_zalo.yaml` | Bấm nút gọi: có cuộc gọi Zalo đến thì **nghe máy**, không thì **gọi Zalo đi** cho người đã chọn. |
 | `man_hinh_the_thong_tin.yaml` | Thẻ thông tin (số lớn + các dòng) từ thực thể HA: điện, nhiệt độ, cảm biến… |
 
