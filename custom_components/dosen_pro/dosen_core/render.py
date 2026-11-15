@@ -123,7 +123,8 @@ _DAYS = ("Thứ hai", "Thứ ba", "Thứ tư", "Thứ năm", "Thứ sáu", "Th�
 
 # ── Đồng hồ đầy đủ: giờ lớn, ngày lễ, âm lịch, Can Chi, tuần, thời tiết (kiểu bảng e-ink sáng) ──────────────────
 
-CLOCK_BG, INK, RED, GREY, RULE = (238, 238, 232), (22, 22, 22), (176, 36, 36), (112, 112, 106), (70, 70, 66)
+# Màu cho màn LCD nhỏ: nền gần trắng, chữ ĐEN (không dùng chữ xám: khó đọc trên màn), đỏ tươi cho điểm nhấn.
+CLOCK_BG, INK, RED, RULE = (250, 250, 246), (0, 0, 0), (214, 22, 22), (30, 30, 30)
 
 WEATHER_VI = {
     "sunny": "Trời nắng", "clear-night": "Trời quang", "partlycloudy": "Ít mây", "cloudy": "Nhiều mây",
@@ -161,7 +162,7 @@ def weather_icon(kind: str, night: bool, size: int = 64) -> Image.Image:
     s = size * k
     img = Image.new("RGBA", (s, s), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    sun_c, cloud_c, dark_c, rain_c, bolt_c, snow_c = (236, 152, 24), (150, 160, 176), (104, 114, 130), (46, 108, 200), (244, 196, 20), (96, 150, 214)
+    sun_c, cloud_c, dark_c, rain_c, bolt_c, snow_c = (255, 140, 0), (96, 120, 156), (58, 74, 104), (0, 100, 224), (255, 190, 0), (40, 130, 230)
     if kind == "sunny":
         (_moon(d, s * .5, s * .5, s * .28, (90, 100, 160), (0, 0, 0, 0)) if night else _sun(d, s * .5, s * .5, s * .22, sun_c))
     elif kind == "clear-night":
@@ -175,7 +176,7 @@ def weather_icon(kind: str, night: bool, size: int = 64) -> Image.Image:
     elif kind == "fog":
         _cloud(d, s * .08, s * .02, s * .84, cloud_c)
         for i in range(3):
-            d.line([s * .16, s * (.66 + i * .12), s * .84, s * (.66 + i * .12)], fill=GREY, width=int(s * .05))
+            d.line([s * .16, s * (.66 + i * .12), s * .84, s * (.66 + i * .12)], fill=dark_c, width=int(s * .05))
     elif kind == "windy" or kind == "exceptional":
         for i, (x1, x2) in enumerate(((.12, .8), (.2, .9), (.12, .66))):
             d.line([s * x1, s * (.32 + i * .17), s * x2, s * (.32 + i * .17)], fill=cloud_c, width=int(s * .06))
@@ -248,7 +249,7 @@ def render_clock(now, weather: dict | None = None) -> bytes:
     _centered(d, f"Tháng {now.month}", _font(20, True), WIDTH * 3 / 4, 172, RED)
     lunar = f"Âm lịch {info['lunar_day']:02d}/{info['lunar_month']:02d}" + (" nhuận" if info["leap"] else "")
     _centered(d, lunar, _font(13), WIDTH * 3 / 4, 198, INK)
-    _centered(d, f"Tuần {info['week']}", _font(12), WIDTH * 3 / 4, 216, GREY)
+    _centered(d, f"Tuần {info['week']}", _font(13, True), WIDTH * 3 / 4, 216, INK)
     d.line([8, 236, WIDTH - 8, 236], fill=RULE, width=1)
     # 5) thời tiết
     if weather and weather.get("condition") is not None:
@@ -267,10 +268,10 @@ def render_clock(now, weather: dict | None = None) -> bytes:
         if weather.get("high") is not None and weather.get("low") is not None:
             extra.append(f"{round(weather['low'])}°–{round(weather['high'])}°")
         if extra:
-            d.text((90, 303), "  ".join(extra), font=_font(12), fill=GREY)
+            d.text((90, 302), "  ".join(extra), font=_font(13, True), fill=INK)
     else:
-        _centered(d, "Chọn thời tiết ở ô", _font(13), WIDTH / 2, 262, GREY)
-        _centered(d, "«Thời tiết trên đồng hồ»", _font(13), WIDTH / 2, 282, GREY)
+        _centered(d, "Chọn thời tiết ở ô", _font(14, True), WIDTH / 2, 262, INK)
+        _centered(d, "«Thời tiết trên đồng hồ»", _font(14, True), WIDTH / 2, 282, INK)
     buf = io.BytesIO()
     img.save(buf, "PNG")
     return buf.getvalue()
