@@ -142,7 +142,7 @@ async def test_entities_like_the_assist_camera_plus_screen(hass, aioclient_mock,
     ids = set(hass.states.async_entity_ids())
     for e in ("media_player.dosen_pro_loa", "assist_satellite.dosen_pro", "number.dosen_pro_tang_mic",
               "number.dosen_pro_thoi_gian_sang_man_hinh", "number.dosen_pro_do_sang_man_hinh",
-              "switch.dosen_pro_tat_mic", "switch.dosen_pro_nguon_man_hinh",
+              "switch.dosen_pro_tat_mic", "sensor.dosen_pro_muc_mic",
               "switch.dosen_pro_hien_hoi_thoai_tren_man_hinh", "sensor.dosen_pro_noi_dung_man_hinh",
               "button.dosen_pro_bat_man_hinh", "button.dosen_pro_tat_man_hinh",
               "button.dosen_pro_ve_man_hinh_mac_dinh", "button.dosen_pro_dung_loa",
@@ -150,15 +150,12 @@ async def test_entities_like_the_assist_camera_plus_screen(hass, aioclient_mock,
               "select.dosen_pro_man_hinh_mac_dinh"):
         assert e in ids, (e, sorted(ids))
     assert any(i.startswith("select.dosen_pro") for i in ids)       # pipeline + độ nhạy nói xong
-    # Camera không báo nguồn màn hình: trạng thái giả định, HA hiện cả hai nút (không báo «tắt» sai).
-    assert hass.states.get("switch.dosen_pro_nguon_man_hinh").attributes["assumed_state"] is True
+    # Bật/tắt nguồn màn hình là NÚT (camera không báo ngược trạng thái), không có công tắc.
+    assert "switch.dosen_pro_nguon_man_hinh" not in ids
 
 
-async def test_screen_power_switch_and_numbers_write_to_the_camera(hass, aioclient_mock, monkeypatch):
+async def test_numbers_write_to_the_camera(hass, aioclient_mock, monkeypatch):
     await _setup(hass, aioclient_mock, monkeypatch)
-    await hass.services.async_call("switch", "turn_on", {"entity_id": "switch.dosen_pro_nguon_man_hinh"}, blocking=True)
-    assert _posts(aioclient_mock, "/api/screen/power")[-1][2] == {"on": True}
-    assert hass.states.get("switch.dosen_pro_nguon_man_hinh").state == "on"
     await hass.services.async_call("number", "set_value", {"entity_id": "number.dosen_pro_thoi_gian_sang_man_hinh", "value": 0}, blocking=True)
     assert _posts(aioclient_mock, "/api/screen/sleep")[-1][2] == {"seconds": 0}
     await hass.services.async_call("number", "set_value", {"entity_id": "number.dosen_pro_do_sang_man_hinh", "value": 40}, blocking=True)
@@ -235,3 +232,20 @@ async def test_camera_alarms_become_bus_events_and_an_event_entity(hass, aioclie
     assert got and got[0]["event"] == "LocalAlarm" and got[0]["status"] == "Start" and got[0]["possible_button_press"] is True
     assert hass.states.get("event.dosen_pro_su_kien_camera").attributes["event_type"] == "alarm"
     assert _posts(aioclient_mock, "/api/events/start")
+
+
+async def test_mic_level_sensor_follows_the_satellite_stream(hass, aioclient_mock, monkeypatch):
+    from custom_components.dosen_pro.assist_satellite import muc_db
+    import array, math
+    quiet = array.array("h", [10] * 1024).tobytes()
+    loud = array.array("h", [int(16000 * math.sin(i / 5)) for i in range(1024)]).tobytes()
+    assert muc_db(quiet) < -60 < -10 < muc_db(loud) and muc_db(b"") == -90.0
+    entry = await _setup(hass, aioclient_mock, monkeypatch)
+    coord = hass.data[DOMAIN][entry.entry_id]
+    assert hass.states.get("sensor.dosen_pro_muc_mic").state == "unknown"       # chưa có luồng
+    coord.set_mic_level(muc_db(loud))
+    await hass.async_block_till_done()
+    assert float(hass.states.get("sensor.dosen_pro_muc_mic").state) > -20
+    coord.set_mic_level(None)
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.dosen_pro_muc_mic").state == "unknown"

@@ -29,7 +29,8 @@ Làm theo khuôn của [ha-camera-talk](https://github.com/TriTue2011/ha-camera-
 | `switch.dosen_pro_tat_mic` | Tắt nghe (loa và màn hình vẫn chạy). |
 | `select.dosen_pro_…` | Chọn pipeline Assist; độ nhạy nhận biết «nói xong». |
 | `switch.dosen_pro_hien_hoi_thoai_tren_man_hinh` | Bật/tắt việc hiện hội thoại Assist trên màn hình. |
-| `switch.dosen_pro_nguon_man_hinh` | Nguồn màn hình camera (nút «Nguồn điện màn hình» của app). **Camera không báo ngược trạng thái, nên đây là trạng thái giả định** (nhớ lệnh gần nhất, HA hiện cả hai nút). |
+| `button.dosen_pro_bat_man_hinh`, `button.dosen_pro_tat_man_hinh` | Bật / tắt nguồn màn hình camera (nút «Nguồn điện màn hình» của app). Là **nút**, không phải công tắc: camera không báo ngược nguồn màn hình đang bật hay tắt. |
+| `sensor.dosen_pro_muc_mic` | Mức tiếng mic (dBFS) đang đưa vào Assist. Nói gần camera mà số vẫn từ -60 trở xuống thì tăng «Tăng mic»; không có số = chưa có luồng mic. |
 | `number.dosen_pro_thoi_gian_sang_man_hinh`, `number.dosen_pro_do_sang_man_hinh` | Thời gian màn hình sáng (0 = không bao giờ tắt) và độ sáng 1–100%. |
 | `sensor.dosen_pro_noi_dung_man_hinh` | Màn hình đang chiếu gì: `off` (không chiếu gì từ HA), `video`, `image`, `text`. **Không phải nguồn màn hình**: màn camera có thể đang sáng dù cảm biến này là `off`. |
 

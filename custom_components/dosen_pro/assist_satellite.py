@@ -9,9 +9,11 @@ lên màn hình camera** (công tắc «Hiện hội thoại trên màn hình»)
 
 from __future__ import annotations
 
+import array
 import asyncio
 import contextlib
 import logging
+import math
 from typing import Any
 
 from homeassistant.components import tts
@@ -37,6 +39,16 @@ def loc_mic(tang_db: float) -> str:
     if tang_db > 0:
         loc += f",volume={tang_db:g}dB,alimiter=limit=0.9:attack=5:release=50:level=false"
     return loc
+
+
+def muc_db(khuc: bytes) -> float:
+    """Mức RMS của một khúc PCM16 mono, đơn vị dBFS (0 = to nhất, -90 = im)."""
+    a = array.array("h")
+    a.frombytes(khuc[: len(khuc) // 2 * 2])
+    if not a:
+        return -90.0
+    rms = math.sqrt(sum(x * x for x in a) / len(a))
+    return max(-90.0, 20 * math.log10(max(rms, 1e-9) / 32768))
 
 
 async def async_setup_entry(hass: HomeAssistant, entry, async_add_entities) -> None:
@@ -175,15 +187,20 @@ class DosenSatellite(DosenEntity, AssistSatelliteEntity):
             proc = self._mic_proc = await asyncio.create_subprocess_exec(
                 *lenh, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL)
+            n = 0
             try:
                 while True:
                     khuc = await proc.stdout.readexactly(MIC_CHUNK)
+                    n += 1
+                    if n % 8 == 0:                                   # ~2 lần/giây: cho cảm biến «Mức mic»
+                        self._data.set_mic_level(muc_db(khuc))
                     if self._dang_noi or self._data.mic_muted:
                         continue
                     if self._hang.full():
                         self._hang.get_nowait()
                     self._hang.put_nowait(khuc)
             except asyncio.IncompleteReadError:
+                self._data.set_mic_level(None)
                 if not self._mo_lai_mic:
                     _LOGGER.warning("%s: mic stream ended, reopening", self.entity_id)
             finally:

@@ -84,9 +84,22 @@ class DosenCoordinator(DataUpdateCoordinator):
         self.mic_gain_db = 0.0
         self.show_chat = True
         self.default_source = ""          # nguồn cho màn hình mặc định ảnh/video/live (đặt bởi thực thể text)
+        self.mic_level_db: float | None = None   # mức tiếng mic gần nhất (dBFS), None = chưa có luồng
+        self._on_level: list = []
         self._on_alarm: list = []
         self._on_mute: list = []
         self._on_gain: list = []
+
+    @callback
+    def set_mic_level(self, db: float | None) -> None:
+        self.mic_level_db = db
+        for fn in list(self._on_level):
+            fn()
+
+    @callback
+    def listen_level(self, fn):
+        self._on_level.append(fn)
+        return lambda: self._on_level.remove(fn)
 
     @callback
     def listen_alarm(self, fn):
