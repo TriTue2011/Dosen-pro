@@ -79,3 +79,26 @@ def test_speaker_plays_audio_to_the_talk_channel(fake_cam_avtalk):
     finally:
         spk.stop()
     assert talk.running is False
+
+
+def test_speaker_uses_the_avtalk_audio_channel_while_the_screen_is_open(fake_cam_avtalk):
+    """Màn đang mở thì camera giữ loa cho AVTalk (OPTalk bị Ret 503): tiếng phải đi theo AVTalk."""
+    talk = TalkSession()
+    scr = Screen()
+    spk = Speaker(talk, scr)
+    try:
+        if os.path.exists("/tmp/fake-cam-talk.bin"):
+            os.remove("/tmp/fake-cam-talk.bin")
+        scr.show_text("t", ["đang hiện"])
+        assert _wait(lambda: scr.status()["sender"]["key_packets"] >= 1)
+        spk.play("lavfi:sine=frequency=440:duration=1.5")
+        assert spk.status()["route"] == "avtalk"
+        assert _wait(lambda: spk.status()["playing"] is False, 25)
+        assert spk.status()["bytes_sent"] >= 8000 and spk.status()["last_error"] is None
+        audio = [m for m in _media(fake_cam_avtalk) if m[1].startswith("000001fa")]
+        loud = [m for m in audio if m[1][16:] != "d5" * 8]              # không phải âm im lặng
+        assert len(loud) >= 20
+        assert not os.path.exists("/tmp/fake-cam-talk.bin")             # không mở kênh OPTalk
+    finally:
+        spk.stop()
+        scr.off()

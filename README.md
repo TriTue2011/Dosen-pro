@@ -46,6 +46,6 @@ Dịch vụ `dosen_pro.screen_show`, `screen_text`, `screen_off`, `speaker_play`
 ## Giới hạn đã biết
 
 - Loa và mic của camera là chất lượng điện thoại (G.711, 8 kHz): nhạc nghe như qua điện thoại.
-- Màn hình 240×320, một phiên hình tại một thời điểm; hình có tiếng chưa hỗ trợ (hiện gửi âm thanh im lặng kèm hình, tiếng đi qua `speaker_play`).
+- Màn hình 240×320, một phiên hình tại một thời điểm; hình có tiếng chưa hỗ trợ (hiện gửi âm thanh im lặng kèm hình; tiếng từ `speaker_play` đi qua kênh âm thanh của chính phiên màn hình khi màn đang mở).
 - Nút gọi trên camera **không** sinh event qua đường LAN (đã đo): chưa bắt được sự kiện bấm nút.
 - Chưa có tích hợp Assist (mic → STT) và cầu nối cuộc gọi Zalo: đã có đủ API (mic, loa, màn hình) để nối.

@@ -199,6 +199,10 @@ class AVTalkSender:
         self.session = session
         self.width, self.height, self.fps = width, height, fps
         self._q: queue.Queue = queue.Queue(maxsize=max_queue)
+        # Audio to the camera speaker while the screen is open: the camera gives the
+        # speaker to AVTalk (a separate OPTalk claim gets Ret 503), so sound travels
+        # in AVTalk's own audio channel, in place of the silence sent by default.
+        self._aq: queue.Queue = queue.Queue(maxsize=50)
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._need_key = True
@@ -231,6 +235,12 @@ class AVTalkSender:
             if is_key:
                 self._q.put_nowait((is_key, au))
 
+    def push_audio(self, g711: bytes, timeout: float = 1.0) -> None:
+        """Queue G.711 A-law audio (any length) for the camera speaker; blocks while
+        the queue is full, so a real-time producer is paced by the 40 ms packet clock."""
+        for i in range(0, len(g711), 320):
+            self._aq.put(g711[i:i + 320].ljust(320, b"\xd5"), timeout=timeout)
+
     def reset(self) -> None:
         """Drop queued frames and wait for the next key frame (source switch)."""
         while True:
@@ -253,7 +263,11 @@ class AVTalkSender:
                 now = time.monotonic()
                 budget = 5
                 while next_audio <= now and budget:
-                    self._send(audio_packet())
+                    try:
+                        frame = self._aq.get_nowait()
+                    except queue.Empty:
+                        frame = SILENCE_ALAW
+                    self._send(audio_packet(frame))
                     self.audio_sent += 1
                     next_audio += AUDIO_PERIOD_S
                     budget -= 1

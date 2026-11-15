@@ -117,6 +117,11 @@ class Screen:
             self._session.close()
         self._sender = self._session = None
 
+    def audio_sink(self):
+        """The running AVTalk sender (it has ``push_audio``), or None when the screen is off."""
+        sender = self._sender
+        return sender if sender is not None and sender.running else None
+
     # -- sources ---------------------------------------------------------
     def _stop_encoder(self) -> None:
         self._token += 1

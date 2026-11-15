@@ -66,7 +66,7 @@ _talk = TalkSession()
 _video = VideoPipeline()
 _events = AlarmSession()
 _screen = Screen()
-_speaker = Speaker(_talk)
+_speaker = Speaker(_talk, _screen)
 _started_at = time.time()
 
 

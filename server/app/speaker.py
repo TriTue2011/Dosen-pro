@@ -1,11 +1,14 @@
 """Play audio (file, URL, TTS, stream) out of the camera speaker.
 
-One ffmpeg process decodes any source to 8 kHz mono PCM, paced in real time
-(``-re``), and the chunks go to the camera over an OPTalk session. The camera
-speaker is telephone quality (G.711, 8 kHz).
+One ffmpeg process decodes any source to 8 kHz mono, paced in real time (``-re``).
+Two routes to the camera: an OPTalk session when the screen is closed, or the audio
+channel of the open AVTalk (screen) session when it is open, because the camera
+refuses OPTalk (Ret 503) while AVTalk holds the speaker. The camera speaker is
+telephone quality (G.711, 8 kHz).
 """
 
 import logging
+import queue
 import subprocess
 import threading
 import time
@@ -19,8 +22,10 @@ _CHUNK = 640            # 40 ms of PCM16 at 8 kHz = one talk packet
 
 
 class Speaker:
-    def __init__(self, talk: TalkSession):
+    def __init__(self, talk: TalkSession, screen=None):
         self._talk = talk
+        self._screen = screen
+        self.route = ""
         self._lock = threading.RLock()
         self._proc: subprocess.Popen | None = None
         self._token = 0
@@ -35,7 +40,9 @@ class Speaker:
             raise ValueError("volume must be between 0 and 4 (1 = unchanged)")
         with self._lock:
             self._stop_proc()
-            if not self._talk.running:
+            sink = self._screen.audio_sink() if self._screen is not None else None
+            self.route = "avtalk" if sink is not None else "optalk"
+            if sink is None and not self._talk.running:
                 self._talk.start()
                 self._we_started_talk = True
             cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-re"]
@@ -44,8 +51,9 @@ class Speaker:
                 src = source[len("lavfi:"):]
             else:
                 src = source
+            fmt = "alaw" if sink is not None else "s16le"
             cmd += ["-i", src, "-vn", "-ac", "1", "-ar", "8000",
-                    "-filter:a", f"volume={volume}", "-f", "s16le", "-"]
+                    "-filter:a", f"volume={volume}", "-f", fmt, "-"]
             try:
                 proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                         stderr=subprocess.PIPE)
@@ -55,20 +63,24 @@ class Speaker:
             self._token += 1
             self.source, self.playing, self.last_error = source, True, None
             self.bytes_sent = 0
-            threading.Thread(target=self._pump, args=(proc, self._token),
+            threading.Thread(target=self._pump, args=(proc, self._token, sink),
                              daemon=True, name="speaker-pump").start()
-            log.info("loa: phat %s volume=%s", redact_source(source), volume)
+            log.info("loa: phat %s volume=%s duong=%s", redact_source(source),
+                     volume, self.route)
         return self.status()
 
-    def _pump(self, proc: subprocess.Popen, token: int) -> None:
+    def _pump(self, proc: subprocess.Popen, token: int, sink=None) -> None:
         try:
             while token == self._token:
-                data = proc.stdout.read(_CHUNK)
+                data = proc.stdout.read(320 if sink is not None else _CHUNK)
                 if not data:
                     break
-                self._talk.send_pcm16(data if len(data) % 2 == 0 else data[:-1])
+                if sink is not None:
+                    sink.push_audio(data)             # A-law, paced by the screen's audio clock
+                else:
+                    self._talk.send_pcm16(data if len(data) % 2 == 0 else data[:-1])
                 self.bytes_sent += len(data)
-        except (OSError, DVRIPError) as exc:
+        except (OSError, DVRIPError, queue.Full) as exc:
             if token == self._token:
                 self.last_error = f"send failed: {exc}"
                 log.warning("loa: %s", self.last_error)
@@ -111,6 +123,6 @@ class Speaker:
         return self.status()
 
     def status(self) -> dict:
-        return {"playing": self.playing,
+        return {"playing": self.playing, "route": self.route,
                 "source": redact_source(self.source),
                 "bytes_sent": self.bytes_sent, "last_error": self.last_error}
