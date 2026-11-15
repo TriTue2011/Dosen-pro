@@ -242,13 +242,13 @@ def render_clock(now, weather: dict | None = None) -> bytes:
         d.text((x, 136), t, font=f17, fill=colour)
         x += d.textlength(t, font=f17)
     d.line([8, 166, WIDTH - 8, 166], fill=RULE, width=1)
-    # 4) năm Can Chi | tháng + âm lịch + tuần
+    # 4) năm Can Chi | âm lịch + tuần
     d.line([WIDTH / 2, 168, WIDTH / 2, 234], fill=RULE, width=1)
     _centered(d, str(now.year), _font(28, True), WIDTH / 4, 170, RED)
     _centered(d, f"Năm {info['can_chi']}", _font(14), WIDTH / 4, 206, INK)
-    _centered(d, f"Tháng {now.month}", _font(20, True), WIDTH * 3 / 4, 172, RED)
-    lunar = f"Âm lịch {info['lunar_day']:02d}/{info['lunar_month']:02d}" + (" nhuận" if info["leap"] else "")
-    _centered(d, lunar, _font(13), WIDTH * 3 / 4, 198, INK)
+    # Ô bên phải: ÂM LỊCH (dương lịch đã có ở dòng trên cùng): ngày/tháng âm to màu đỏ, nhãn, số tuần.
+    _centered(d, f"{info['lunar_day']:02d}/{info['lunar_month']:02d}", _font(28, True), WIDTH * 3 / 4, 167, RED)
+    _centered(d, "Âm lịch" + (" nhuận" if info["leap"] else ""), _font(14, True), WIDTH * 3 / 4, 200, INK)
     _centered(d, f"Tuần {info['week']}", _font(13, True), WIDTH * 3 / 4, 216, INK)
     d.line([8, 236, WIDTH - 8, 236], fill=RULE, width=1)
     # 5) thời tiết
