@@ -27,7 +27,7 @@ async def _auto(hass, name, inputs, tmp_path):
     await hass.async_block_till_done()
 
 
-@pytest.mark.parametrize("name", ["man_hinh_su_kien.yaml", "man_hinh_nhieu_su_kien.yaml", "nut_goi_camera_zalo.yaml",
+@pytest.mark.parametrize("name", ["man_hinh_su_kien.yaml", "man_hinh_nhieu_su_kien.yaml", "man_hinh_nhieu_viec.yaml", "nut_goi_camera_zalo.yaml",
                                   "man_hinh_the_thong_tin.yaml"])
 def test_blueprints_load(name):
     bp = _bp(name)
@@ -151,3 +151,71 @@ async def test_old_event_blueprint_camera_now_carries_priority_and_split(hass, t
         "kieu": "camera", "camera": "camera.cua", "thoi_gian": 10, "uu_tien": "3"}, tmp_path)
     await _fire(hass, "binary_sensor.nguoi")
     assert shows[-1].data == {"camera_entity": "camera.cua", "owner": "su_kien", "after": "hold", "priority": 3, "split": True, "ttl": 10.0}
+
+
+# -- «Một automation, thêm bao nhiêu sự kiện cũng được» ------------------------------------------------------------
+
+def _trig(event, tid):
+    return {"trigger": "event", "event_type": event, "id": tid}
+
+
+async def test_many_events_one_automation_each_trigger_id_runs_its_own_job(hass, tmp_path):
+    shows = async_mock_service(hass, "dosen_pro", "screen_show")
+    texts = async_mock_service(hass, "dosen_pro", "screen_text")
+    await _auto(hass, "man_hinh_nhieu_viec.yaml", {
+        "trigger": [_trig("nguoi", "nguoi_o_cua"), _trig("khoi", "khoi_bep")],
+        "viec": [
+            {"ten": "Người ở cửa", "khi": ["nguoi_o_cua"], "kieu": "camera", "camera": ["camera.cua"], "thoi_gian": 20, "uu_tien": 3, "ten_lop": "nguoi_o_cua"},
+            {"ten": "Khói bếp", "khi": ["khoi_bep"], "kieu": "chu", "tieu_de": "Có khói", "noi_dung": "Khói trong bếp", "uu_tien": 4, "ten_lop": "khoi"}]}, tmp_path)
+    hass.bus.async_fire("nguoi")
+    await hass.async_block_till_done()
+    assert [x.data for x in shows] == [{"camera_entity": "camera.cua", "owner": "nguoi_o_cua", "after": "hold", "priority": 3, "split": True, "ttl": 20.0}]
+    assert not texts
+    hass.bus.async_fire("khoi")
+    await hass.async_block_till_done()
+    assert len(shows) == 1 and texts[-1].data == {"title": "Có khói", "messages": [{"role": "info", "text": "Khói trong bếp"}], "owner": "khoi",
+                                                  "after": "hold", "priority": 4}
+
+
+async def test_many_events_several_cameras_split_and_condition_entity_gates_the_job(hass, tmp_path):
+    shows = async_mock_service(hass, "dosen_pro", "screen_show")
+    hass.states.async_set("input_boolean.co_nha", "on")
+    await _auto(hass, "man_hinh_nhieu_viec.yaml", {
+        "trigger": [_trig("bam", "chuong")],
+        "viec": [
+            {"ten": "Chuông - hai camera", "khi": ["chuong"], "kieu": "camera", "camera": ["camera.cua", "camera.san"], "ten_lop": "chuong"},
+            {"ten": "Chỉ khi vắng nhà", "khi": ["chuong"], "chi_khi_thuc_the": "input_boolean.co_nha", "chi_khi_trang_thai": ["off"],
+             "kieu": "anh", "nguon": "http://nas/anh.jpg", "ten_lop": "vang"}]}, tmp_path)
+    hass.bus.async_fire("bam")
+    await hass.async_block_till_done()
+    assert [x.data["camera_entity"] for x in shows] == ["camera.cua", "camera.san"]
+    assert [x.data["owner"] for x in shows] == ["chuong_1", "chuong_2"]               # nhiều camera: mỗi camera một lớp riêng để chia đôi màn
+    shows.clear()
+    hass.states.async_set("input_boolean.co_nha", "off")                               # vắng nhà: việc thứ hai khớp
+    hass.bus.async_fire("bam")
+    await hass.async_block_till_done()
+    assert shows[-1].data == {"loop": False, "owner": "vang", "priority": 2, "after": "hold", "source": "http://nas/anh.jpg"}
+
+
+async def test_many_events_modes_first_or_most_recent_condition_sensor(hass, tmp_path):
+    import asyncio
+    shows = async_mock_service(hass, "dosen_pro", "screen_show")
+    hass.states.async_set("binary_sensor.a", "on")
+    await asyncio.sleep(0.05)
+    hass.states.async_set("binary_sensor.b", "on")
+    jobs = [{"ten": "a", "chi_khi_thuc_the": "binary_sensor.a", "chi_khi_trang_thai": ["on"], "kieu": "camera", "camera": ["camera.a"], "ten_lop": "a"},
+            {"ten": "b", "chi_khi_thuc_the": "binary_sensor.b", "chi_khi_trang_thai": ["on"], "kieu": "camera", "camera": ["camera.b"], "ten_lop": "b"}]
+    await _auto(hass, "man_hinh_nhieu_viec.yaml", {"trigger": [_trig("go", "x")], "viec": jobs, "cach_chon": "moi_nhat"}, tmp_path)
+    hass.bus.async_fire("go")
+    await hass.async_block_till_done()
+    assert [x.data["camera_entity"] for x in shows] == ["camera.b"]                    # b đổi trạng thái sau cùng
+
+
+async def test_many_events_a_hundred_jobs_pick_by_trigger_id(hass, tmp_path):
+    shows = async_mock_service(hass, "dosen_pro", "screen_show")
+    jobs = [{"ten": "v%d" % i, "khi": ["t%d" % i], "kieu": "camera", "camera": ["camera.c%d" % i], "ten_lop": "l%d" % i} for i in range(100)]
+    await _auto(hass, "man_hinh_nhieu_viec.yaml", {"trigger": [_trig("s%d" % i, "t%d" % i) for i in (3, 57, 99)], "viec": jobs}, tmp_path)
+    hass.bus.async_fire("s57")
+    await hass.async_block_till_done()
+    assert [x.data["camera_entity"] for x in shows] == ["camera.c57"]
+

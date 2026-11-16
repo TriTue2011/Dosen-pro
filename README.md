@@ -264,6 +264,7 @@ Chép các tệp trong `blueprints/automation/dosen_pro/` vào `/config/blueprin
 
 | Blueprint | Làm gì |
 |---|---|
+| `man_hinh_nhieu_viec.yaml` | **Khuyên dùng: MỘT automation cho mọi sự kiện, thêm bao nhiêu việc cũng được** (không có danh sách làm sẵn). Trigger nào cũng được, đặt ID cho từng trigger; mỗi việc chọn trigger ID nào kích hoạt, tuỳ chọn «chỉ khi thực thể ở trạng thái», rồi chiếu camera (nhiều camera chia đôi màn) / hình / video / chữ với mức ưu tiên, thời gian giữ, tên lớp. Khi nhiều việc cùng khớp: chạy tất cả, việc đứng đầu, hoặc việc có cảm biến điều kiện đổi gần nhất. Thay cho hai blueprint ngay dưới (vẫn dùng được). |
 | `man_hinh_su_kien.yaml` | Có sự kiện (chuông cửa, phát hiện người…) thì chiếu video / camera trực tiếp / ảnh / chữ lên màn, giữ N giây. |
 | `man_hinh_nhieu_su_kien.yaml` | **Một automation, 4 ô sự kiện**: mỗi ô có cảm biến kích hoạt riêng, một loại riêng (camera — chọn nhiều camera / hình / video / chữ), mức ưu tiên và thời gian giữ riêng. Camera chia đôi màn, xoay 5 giây (xem *Nhiều sự kiện cùng lúc*). Điều kiện mỗi ô là «thực thể đổi sang trạng thái» (HA không cho gộp nhiều bộ kích hoạt tuỳ ý trong một blueprint). |
 | `nut_goi_camera_zalo.yaml` | Bấm nút gọi: có cuộc gọi Zalo đến thì **nghe máy**, không thì **gọi Zalo đi** cho người đã chọn. |

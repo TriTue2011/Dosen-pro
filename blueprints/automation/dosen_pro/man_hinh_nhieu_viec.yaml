@@ -1,0 +1,215 @@
+blueprint:
+  name: "Dosen Pro: chiếu lên màn camera - MỘT automation, thêm bao nhiêu sự kiện cũng được"
+  description: >-
+    **Một automation cho mọi sự kiện chiếu lên màn camera.** Thay cho «chiếu lên màn camera khi có sự kiện» (một sự kiện) và «nhiều sự kiện» (4 ô cố định):
+    **không có danh sách làm sẵn**, bấm «Thêm» khi cần một việc mới, kể cả 100 việc.
+
+
+    **Cách khai:** ô «Khi nào» nhận MỌI loại trigger (cảm biến đổi trạng thái, sự kiện, giờ…); đặt **ID** cho từng trigger (ví dụ `nguoi_o_cua`, `khoi_bep`).
+    Mỗi **việc** nêu *ID trigger nào kích hoạt nó* (trống = mọi trigger), tuỳ chọn *chỉ khi một cảm biến khác đang ở trạng thái nào* (ví dụ ban đêm, không có nhà),
+    rồi *chiếu gì* (camera trực tiếp, hình, video hay dòng chữ), mức ưu tiên, thời gian giữ và tên lớp.
+
+
+    **Khi nhiều việc cùng khớp** (chọn ở ô «Khi nhiều việc cùng khớp»): chạy **tất cả** (mặc định; tích hợp tự xếp theo mức ưu tiên, camera cùng mức chia đôi màn),
+    hoặc chỉ việc **đứng đầu**, hoặc chỉ việc có cảm biến điều kiện **đổi trạng thái gần nhất**.
+
+
+    **Luật chiếu** (do tích hợp xử lý): mức ưu tiên cao hơn luôn ở trên; cùng mức thì sự kiện tới sau đè lên; camera cùng mức trên cùng chia đôi màn (tối đa 2, nhiều hơn thì
+    đổi lượt mỗi 5 giây); hết sự kiện cuối thì về màn hình mặc định. Mỗi việc dùng một «tên lớp»: cùng tên thì thay nhau, khác tên thì xếp chồng. Đừng dùng «zalo_call» và «zalo_call_video» (dành cho cuộc gọi Zalo).
+  domain: automation
+  author: TriTue2011
+  homeassistant:
+    min_version: 2024.11.0
+  input:
+    khi_nao:
+      name: ① Khi nào
+      icon: mdi:flash-outline
+      input:
+        trigger:
+          name: Các trigger (đặt ID cho từng cái)
+          description: "Thêm trigger của từng sự kiện (cảm biến người, cửa mở, chuông, sự kiện…). Đặt **ID** để việc bên dưới biết trigger nào kích hoạt nó."
+          selector:
+            trigger: {}
+        dieu_kien:
+          name: Điều kiện chung (tuỳ chọn)
+          description: "Áp cho mọi việc (ví dụ chỉ khi có nhà)."
+          default: []
+          selector:
+            condition: {}
+    viec_nhom:
+      name: ② Các việc (thêm khi cần)
+      icon: mdi:format-list-checks
+      input:
+        viec:
+          name: Việc
+          description: "Bấm «Thêm». Mỗi việc: **Tên**; **Khi trigger ID** (trống = mọi trigger); **Chỉ khi cảm biến / ở trạng thái** (tuỳ chọn); **Chiếu gì** và các ô tương ứng."
+          default: []
+          selector:
+            object:
+              multiple: true
+              label_field: ten
+              description_field: kieu
+              fields:
+                ten:
+                  label: Tên việc
+                  selector:
+                    text: {}
+                khi:
+                  label: Khi trigger có ID (trống = mọi trigger)
+                  selector:
+                    text:
+                      multiple: true
+                chi_khi_thuc_the:
+                  label: Chỉ khi thực thể (tuỳ chọn)
+                  selector:
+                    entity: {}
+                chi_khi_trang_thai:
+                  label: ở trạng thái (trống = bất kỳ trừ unavailable/unknown)
+                  selector:
+                    text:
+                      multiple: true
+                kieu:
+                  label: Chiếu gì
+                  required: true
+                  selector:
+                    select:
+                      options:
+                        - {value: camera, label: "Camera trực tiếp"}
+                        - {value: anh, label: "Hình ảnh"}
+                        - {value: video, label: "Video"}
+                        - {value: chu, label: "Dòng chữ"}
+                camera:
+                  label: Camera (khi chọn «Camera trực tiếp»; nhiều camera thì chia đôi / xoay vòng)
+                  selector:
+                    entity:
+                      domain: camera
+                      multiple: true
+                media:
+                  label: Hình / video từ kho media (khi chọn «Hình ảnh» hoặc «Video»)
+                  selector:
+                    media: {}
+                nguon:
+                  label: Địa chỉ gõ tay (thay cho ô media; http(s):// hoặc rtsp://)
+                  selector:
+                    text: {}
+                lap:
+                  label: Lặp video
+                  selector:
+                    boolean: {}
+                tieu_de:
+                  label: Tiêu đề (cho dòng chữ)
+                  selector:
+                    text: {}
+                noi_dung:
+                  label: Nội dung (cho dòng chữ)
+                  selector:
+                    text:
+                      multiline: true
+                thoi_gian:
+                  label: Giữ trên màn bao lâu (giây; 0 = tới khi hết video hoặc có sự kiện khác đè lên)
+                  selector:
+                    number:
+                      min: 0
+                      max: 3600
+                      mode: box
+                uu_tien:
+                  label: Mức ưu tiên (1 thấp · 2 thường · 3 cao · 4 khẩn cấp)
+                  selector:
+                    number:
+                      min: 1
+                      max: 4
+                      mode: box
+                ten_lop:
+                  label: Tên lớp (cùng tên thì thay nhau)
+                  selector:
+                    text: {}
+        cach_chon:
+          name: Khi nhiều việc cùng khớp
+          selector:
+            select:
+              mode: dropdown
+              options:
+                - label: Chạy tất cả (tích hợp tự xếp theo mức ưu tiên)
+                  value: tat_ca
+                - label: Chỉ việc đứng đầu danh sách
+                  value: dau_tien
+                - label: Chỉ việc có cảm biến điều kiện đổi trạng thái gần nhất
+                  value: moi_nhat
+          default: tat_ca
+mode: parallel
+max_exceeded: silent
+trigger: !input trigger
+condition: !input dieu_kien
+variables:
+  viec: !input viec
+  cach_chon: !input cach_chon
+  tid: "{{ trigger.id | string }}"
+  # CHỈ SỐ các việc sẽ chạy: khớp ID trigger và (nếu có) thực thể điều kiện đúng trạng thái.
+  chon: >-
+    {% set ns = namespace(l=[]) %}
+    {% for j in viec | default([], true) %}
+      {% set kn = j.khi | default([], true) %}
+      {% set kn = [kn] if kn is string else kn %}
+      {% if kn | count == 0 or tid in (kn | map('string') | list) %}
+        {% set cb = (j.chi_khi_thuc_the | default('', true)) | string | trim %}
+        {% set ok = true %}
+        {% set t = 0 %}
+        {% if cb != '' %}
+          {% set st = expand(cb) | selectattr('entity_id', 'eq', cb) | first | default(none) %}
+          {% set tt = j.chi_khi_trang_thai | default([], true) %}
+          {% set tt = ([tt] if tt is string else tt) | map('string') | list %}
+          {% set ok = st is not none and ((tt | count == 0 and st.state not in ['unavailable', 'unknown']) or st.state in tt) %}
+          {% if ok %}{% set t = st.last_changed.timestamp() %}{% endif %}
+        {% endif %}
+        {% if ok %}{% set ns.l = ns.l + [{'i': loop.index0, 't': t}] %}{% endif %}
+      {% endif %}
+    {% endfor %}
+    {% if ns.l | count == 0 %}[]
+    {% elif cach_chon == 'dau_tien' %}{{ [ns.l[0].i] | tojson }}
+    {% elif cach_chon == 'moi_nhat' %}
+      {% set b = namespace(x=ns.l[0]) %}
+      {% for u in ns.l %}{% if u.t > b.x.t %}{% set b.x = u %}{% endif %}{% endfor %}
+      {{ [b.x.i] | tojson }}
+    {% else %}{{ ns.l | map(attribute='i') | list | tojson }}
+    {% endif %}
+action:
+  - repeat:
+      for_each: "{{ chon }}"
+      sequence:
+        - variables:
+            s: "{{ viec[repeat.item] }}"
+            kieu: "{{ s.kieu | default('camera', true) }}"
+            lop: "{{ s.ten_lop | default('', true) | string | trim or ('viec_' ~ repeat.item) }}"
+            uu: "{{ s.uu_tien | default(2, true) | int(2) }}"
+            tg: "{{ s.thoi_gian | default(0, true) | float(0) }}"
+        - choose:
+            - conditions: "{{ kieu == 'chu' }}"
+              sequence:
+                - action: dosen_pro.screen_text
+                  data: >-
+                    {% set d = {'title': s.tieu_de | default('Thông báo', true), 'messages': [{'role': 'info', 'text': s.noi_dung | default('', true)}],
+                                'owner': lop, 'after': 'hold', 'priority': uu} %}
+                    {% if tg > 0 %}{% set d = dict(d, ttl=tg) %}{% endif %}
+                    {{ d }}
+            - conditions: "{{ kieu == 'camera' }}"
+              sequence:
+                - variables:
+                    cams: "{{ s.camera if s.camera is list else ([s.camera] if s.camera else []) }}"
+                    lop_goc: "{{ lop }}"
+                - repeat:
+                    for_each: "{{ cams }}"
+                    sequence:
+                      - action: dosen_pro.screen_show
+                        data: >-
+                          {% set d = {'camera_entity': repeat.item, 'owner': lop_goc if cams | count == 1 else lop_goc ~ '_' ~ repeat.index,
+                                      'after': 'hold', 'priority': uu, 'split': true} %}
+                          {% if tg > 0 %}{% set d = dict(d, ttl=tg) %}{% endif %}
+                          {{ d }}
+          default:
+            - action: dosen_pro.screen_show
+              data: >-
+                {% set d = {'loop': s.lap | default(false, true), 'owner': lop, 'priority': uu,
+                            'after': 'hold' if (kieu == 'anh' or tg > 0) else 'off'} %}
+                {% set d = dict(d, source=s.nguon) if (s.nguon | default('', true)) != '' else dict(d, media=s.media | default({}, true)) %}
+                {% if tg > 0 %}{% set d = dict(d, ttl=tg) %}{% endif %}
+                {{ d }}
