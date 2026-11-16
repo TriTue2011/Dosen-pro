@@ -44,6 +44,16 @@ def _text(v):
     return v.strip()
 
 
+def _ids(v):
+    """Danh sách ID người gọi (Zalo threadID / Telegram user_id) cách nhau dấu phẩy hoặc khoảng trắng → chuỗi chuẩn «id1, id2»; trống = mọi người."""
+    if v is None:
+        return ""
+    items = [str(x).strip() for x in (v if isinstance(v, (list, tuple)) else re.split(r"[,\s;]+", str(v))) if str(x).strip()]
+    if len(items) > 100 or any(not x.isdigit() or len(x) > 24 for x in items):
+        raise ValueError("phải là các ID số (threadID Zalo, ID người dùng Telegram) cách nhau dấu phẩy, tối đa 100")
+    return ", ".join(dict.fromkeys(items))
+
+
 def _bool(v):
     if not isinstance(v, bool):
         raise ValueError("phải là true/false")
@@ -59,7 +69,7 @@ def _rotate(v):
 VALIDATORS = {
     "default_mode": _enum(DEFAULT_MODES), "default_camera": _entity_or_empty, "default_image": _entity_or_empty,
     "default_text": _text, "default_weather": _entity_or_empty, "default_rotate": _rotate, "default_fit": _enum(FITS),
-    "default_quality": _enum(QUALITIES), "zalo_call_screen": _bool,
+    "default_quality": _enum(QUALITIES), "zalo_call_screen": _bool, "call_screen_ids": _ids,
 }
 _SOURCE_KEYS = {"default_mode", "default_camera", "default_image", "default_text"}
 

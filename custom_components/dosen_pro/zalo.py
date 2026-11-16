@@ -79,8 +79,9 @@ class ZaloCallScreen:
 
     @callback
     def _on_event(self, event: Event) -> None:
-        if self._c.zalo_call_screen:
-            self.hass.async_create_task(self._handle(dict(event.data)))
+        data = dict(event.data)
+        if self._c.zalo_call_screen and self._c.call_screen_allows(data.get("thread_id") or data.get("peer")):       # chỉ các threadID đã chọn (trống = mọi người)
+            self.hass.async_create_task(self._handle(data))
 
     def _contacts_api(self):
         """API của app Zalo do tích hợp Zalo Call đang giữ (đã đăng nhập sẵn): dùng lại để tra tên, khỏi khai thêm tài khoản."""

@@ -67,7 +67,7 @@ Thẻ có bốn phần, và **bản xem trước bên trái vẽ đúng hình s�
 | **Màn hình mặc định** | Loại (tắt, đồng hồ, ảnh, video, camera trực tiếp), nguồn (chọn camera / ảnh theo danh sách thực thể, hoặc gõ địa chỉ), thời tiết trên đồng hồ, xoay hình, kiểu khung, chất lượng hình. |
 | **Luân phiên các màn** | Bật/tắt, **bao nhiêu giây mỗi màn**, **thẻ nào tham gia** (tích ô vuông), đổi thứ tự (↑↓), thêm / sửa / xoá thẻ. |
 | **Trình soạn thẻ** | Tên thẻ; thẻ thông tin: tiêu đề, **cảm biến chính** (số lớn), **các dòng** (chọn thực thể, đặt tên hiển thị, màu từng dòng, đổi vị trí ↑↓), **màu** số lớn và tiêu đề (bảng màu hoặc màu tuỳ ý), giao diện **sáng/tối**, bố cục **danh sách** hoặc **lưới 2 cột**; thẻ camera / ảnh / đồng hồ. Mọi thay đổi hiện ngay ở bản xem trước. |
-| **Màn hình camera** | Độ sáng, thời gian màn sáng, **tự hiện cuộc gọi Zalo lên màn**, bật / tắt màn. |
+| **Màn hình camera** | Độ sáng, thời gian màn sáng, **tự hiện cuộc gọi Zalo / Telegram lên màn (lọc theo ID người gọi)**, bật / tắt màn. |
 
 «**Gửi thử lên màn (30 giây)**» hiện thẻ đang xem lên màn camera thật rồi tự về như cũ. Cài đặt được lưu, khởi động lại HA vẫn giữ.
 
@@ -83,7 +83,7 @@ Màn hình hoạt động theo **lớp**:
 - **Sự kiện** (`dosen_pro.screen_show`, `screen_text` với `owner` và `ttl`): lớp **gần nhất đè lên**; hết video / hết `ttl` /
   `screen_release` thì về lớp bên dưới, hết lớp thì về màn hình mặc định. Cùng `owner` thì thay nhau, khác thì xếp chồng.
   Lớp sự kiện luôn hiện nguyên trạng (không xoay).
-- **Cuộc gọi Zalo** tự chiếu (lớp `zalo_call` chữ + `zalo_call_video` hình). Chiếu video, camera… làm bằng dịch vụ hoặc **blueprint**; nhiều sự kiện cùng lúc xếp theo mức ưu tiên (mục dưới).
+- **Cuộc gọi Zalo và Telegram** tự chiếu (lớp `zalo_call` / `telegram_call` chữ + `zalo_call_video` / `telegram_call_video` hình). Telegram lấy hình từ telegram-gateway (`/api/live/view/<id>`, MJPEG, token gửi bằng header), hiện khi nghe máy cuộc gọi video hoặc khi người gọi bật camera giữa cuộc thoại. **Chỉ chiếu cuộc gọi của các ID đã chọn:** ô «Chỉ các ID» trên thẻ Dosen Pro (threadID Zalo, ID người dùng Telegram, cách nhau dấu phẩy); để trống = mọi người gọi. Chiếu video, camera… làm bằng dịch vụ hoặc **blueprint**; nhiều sự kiện cùng lúc xếp theo mức ưu tiên (mục dưới).
 
 ### Nhiều sự kiện cùng lúc: ưu tiên, chia đôi, xoay camera
 

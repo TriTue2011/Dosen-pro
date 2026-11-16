@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import asyncio
 import logging
 import secrets
@@ -29,6 +31,7 @@ from .dosen_core.config import CamConfig
 from .card import build_card
 from .carousel import _CARD_ENTITY, _CARD_ROW, COLOR, Carousel
 from .display import DisplaySettings
+from .telegram import TelegramCallScreen
 from .zalo import ZaloCallScreen
 from .websocket import async_register as ws_register
 from .dosen_core.render import CARD_LAYOUTS, CARD_THEMES
@@ -125,7 +128,8 @@ class DosenCoordinator(DataUpdateCoordinator):
         self._default_lock = asyncio.Lock()
         self.startup_done = asyncio.Event()      # lần áp màn mặc định lúc khởi động đã xong (thành công hay bỏ cuộc)
         self.in_call = False              # bộ đàm đang đưa tiếng cuộc gọi ra loa (một cuộc một lúc)
-        self.zalo_call_screen = True             # tự hiện cuộc gọi Zalo (tên người gọi, hình video) lên màn camera
+        self.zalo_call_screen = True             # tự hiện cuộc gọi Zalo / Telegram (tên người gọi, hình video) lên màn camera
+        self.call_screen_ids = ""                 # chỉ hiện cuộc gọi của các ID này (Zalo threadID / Telegram user_id, cách nhau dấu phẩy); trống = mọi người
         self.alarm_events_on = True
         self.audio: dict = {}             # âm lượng loa/mic + chống ồn đọc từ camera (rỗng = chưa đọc)
         # Cài đặt hiển thị (đặt bằng thẻ «Dosen Pro» qua WebSocket, lưu bằng Store — xem display.py).
@@ -136,12 +140,18 @@ class DosenCoordinator(DataUpdateCoordinator):
         self.default_quality = "standard"        # chất lượng mã hoá hình lên màn camera (standard | high | max)
         self.carousel: Carousel | None = None   # màn luân phiên (tạo khi nạp mục cấu hình)
         self.zalo: ZaloCallScreen | None = None
+        self.telegram: TelegramCallScreen | None = None
         self.display: DisplaySettings | None = None   # lưu/áp cài đặt hiển thị (thẻ «Dosen Pro» điều khiển)
         self.default_weather = ""                # thực thể weather.* hiện trên đồng hồ ("" = không hiện)
         self._unsub_weather = None
         self.default_rotate = 0                  # xoay hình (độ, theo chiều kim đồng hồ) cho mọi lớp không tự nêu
         self.default_fit = "contain"             # contain = vừa khung có viền; cover = lấp đầy màn, cắt rìa
         self._on_alarm: list = []
+
+    def call_screen_allows(self, caller_id: Any) -> bool:
+        """Cuộc gọi của ID này có được hiện lên màn không: danh sách trống = mọi người; có danh sách = CHỈ các ID trong đó (cuộc gọi không rõ ID thì không hiện)."""
+        allowed = {x.strip() for x in str(self.call_screen_ids or "").split(",") if x.strip()}
+        return not allowed or str(caller_id or "").strip() in allowed
 
     @property
     def ha_base(self) -> str | None:
@@ -429,6 +439,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coord.zalo = ZaloCallScreen(coord)
     coord.zalo.start()
     entry.async_on_unload(coord.zalo.stop)
+    coord.telegram = TelegramCallScreen(coord)
+    coord.telegram.start()
+    entry.async_on_unload(coord.telegram.stop)
     if not entry.data.get(CONF_INTERCOM_KEY):          # chưa có khoá bộ đàm (mục mới / vừa cấu hình lại): sinh một khoá
         hass.config_entries.async_update_entry(entry, data={**entry.data, CONF_INTERCOM_KEY: secrets.token_urlsafe(24)})
     await _async_register_frontend(hass)

@@ -38,7 +38,7 @@ async def test_state_has_settings_cards_and_the_choices_the_card_offers(hass, ws
     assert r["success"]
     st = r["result"]
     assert st["settings"] == {"default_mode": None, "default_camera": "", "default_image": "", "default_text": "", "default_weather": "",
-                              "default_rotate": 0, "default_fit": "contain", "default_quality": "standard", "zalo_call_screen": True}
+                              "default_rotate": 0, "default_fit": "contain", "default_quality": "standard", "zalo_call_screen": True, "call_screen_ids": ""}
     assert st["carousel"]["seconds"] == 20.0 and st["carousel"]["cards"] == [] and st["carousel"]["on"] is False
     assert {"red", "green"} <= set(st["options"]["colors"]) and st["options"]["themes"] == ["light", "dark"]
     assert st["entry_id"] == _coord(hass).entry.entry_id
